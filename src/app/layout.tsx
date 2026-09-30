@@ -1,12 +1,15 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import type { ReactNode } from "react";
 import "./globals.css";
-import { BottomNav, SiteHeader } from "@/components/site-nav";
 
 export const metadata: Metadata = {
-  title: { default: "eF Masters Pro League 0", template: "%s · eF Masters Arena" },
-  description: "The official competition platform for eF Masters Arena.",
+  title: { default: "eF Masters Arena", template: "%s · eF Masters Arena" },
+  description: "Tournament operations for eF Masters Pro League 0.",
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body><SiteHeader />{children}<BottomNav /></body></html>;
+export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#080d2b" };
+
+export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+  return <html lang="en"><body>{children}</body></html>;
 }
+

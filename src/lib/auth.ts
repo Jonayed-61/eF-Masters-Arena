@@ -1,23 +1,36 @@
 import "server-only";
-import { createClient } from "./supabase/server";
 
-export async function getCurrentUser() {
-  const supabase = await createClient();
-  if (!supabase) return { supabase: null, user: null, profile: null };
+import { cache } from "react";
+import { redirect } from "next/navigation";
+import type { Profile, Role, Viewer } from "@/lib/types";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
+
+export const getViewer = cache(async (): Promise<Viewer | null> => {
+  const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { supabase, user: null, profile: null };
-  const { data: profile } = await supabase.from("profiles").select("*").eq("id", user.id).single();
-  return { supabase, user, profile };
+  if (!user?.email) return null;
+
+  const { data } = await supabase.from("profiles").select("*").eq("id", user.id).single();
+  if (!data || String(data.status).toUpperCase() !== "ACTIVE") return null;
+  const profile = {
+    ...data,
+    role: String(data.role).toUpperCase(),
+    status: String(data.status).toUpperCase(),
+  } as Profile;
+  return { userId: user.id, email: user.email, profile };
+});
+
+export async function requireViewer(role?: Role, returnTo?: string) {
+  const viewer = await getViewer();
+  if (!viewer) redirect(`/login?next=${encodeURIComponent(returnTo ?? "/player/dashboard")}`);
+  if (role && viewer.profile.role !== role) {
+    redirect(viewer.profile.role === "ADMIN" ? "/admin/dashboard" : "/player/dashboard");
+  }
+  return viewer;
 }
 
-export async function requireUser() {
-  const context = await getCurrentUser();
-  if (!context.user || !context.profile) throw new Error("UNAUTHORIZED");
-  return context;
+export function safeReturnPath(value: string | null, fallback: string) {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return fallback;
+  return value;
 }
 
-export async function requireAdmin() {
-  const context = await requireUser();
-  if (context.profile.role !== "admin") throw new Error("FORBIDDEN");
-  return context;
-}

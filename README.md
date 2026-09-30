@@ -1,78 +1,101 @@
 # eF Masters Arena
 
-Production-oriented, mobile-first competition platform for **eF Masters Pro League 0**. It uses Next.js App Router, TypeScript, Tailwind CSS, Supabase Auth/PostgreSQL/Storage/Realtime, Zod, and Lucide.
+Production-oriented, mobile-first tournament management for **eF Masters Pro League 0**.
 
-## What is included
+The application uses Next.js 16, strict TypeScript, Tailwind CSS 4, Supabase PostgreSQL/Auth/Realtime/Storage, Zod, and Lucide React. There is no public registration, no fixture generator, and no match-time field.
 
-- Public home, matchweek fixtures/results, live and official tables, goal leaderboard, player profiles, and interactive H2H comparison
-- Rebuildable standings, player stats, form, goals-by-opponent, goal rankings, and H2H calculations derived only from fixture records
-- Player dashboard with score submission, private screenshot evidence, and opponent confirmation/dispute
-- Admin dashboard with metrics, secure player creation/deactivation, result approval/rejection, and bulk approval
-- PostgreSQL transaction functions for submission, confirmation, correction, rejection, and approval
-- Row Level Security, role checks, audit logs, private evidence storage, notifications, and Realtime subscriptions
-- Duplicate-safe double round-robin generation for even or odd player counts
-- A read-only demo dataset when Supabase environment variables are absent
-- Automated tests for fixture generation, provisional/official separation, H2H, goals-by-opponent, and score correction
+## Safety first
 
-## Run locally
+- The rebuild does not connect to, drop, reset, or mutate a remote Supabase project during installation.
+- The clean migration at `supabase/migrations/202610010001_clean_arena.sql` contains no destructive `DROP` statements.
+- Apply it to a new or staging project first. If the target project contains the legacy schema, back it up and review conflicts before applying; do not run a remote reset.
+- `.env.local` is intentionally retained and ignored by Git.
+- `public/eF masters logo.jpeg` is the untouched official asset. It is displayed directly with `object-fit: contain`.
 
-Requirements: Node.js 20.9 or newer and a Supabase project.
+## Local setup
 
-```bash
-npm install
-copy .env.example .env.local
-npm run dev
+1. Create or select a Supabase development project.
+2. Copy `.env.example` to `.env.local` and add real values. Never expose the service-role key through a `NEXT_PUBLIC_` variable.
+3. Review and apply the migration:
+
+   ```powershell
+   npx supabase link --project-ref YOUR_PROJECT_REF
+   npx supabase db push
+   ```
+
+4. Provision the first Admin with explicit credentials in `.env.local`:
+
+   ```powershell
+   npm run provision:admin
+   ```
+
+5. Create the current tournament with its real start date (the script will not invent one):
+
+   ```powershell
+   npm run provision:tournament -- --start-date=YYYY-MM-DD
+   ```
+
+6. Start the app: `npm run dev`
+
+## Required environment variables
+
+`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_APP_URL`, `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_USERNAME`, and `INITIAL_ADMIN_PASSWORD`.
+
+The service-role key is used only by server-side account provisioning and username login lookup. Browser clients always use the anon key plus RLS.
+
+## Player provisioning
+
+Admins can create players from `/admin/players`. The form requires a real email, username, and temporary password. It does not invent any personal data.
+
+For batch provisioning, create a JSON file outside the repository (or another ignored location):
+
+```json
+[
+  { "username": "JIHAN_FC7", "email": "REAL_EMAIL", "password": "REAL_TEMPORARY_PASSWORD" }
+]
 ```
 
-Open `http://localhost:3000`. Without Supabase variables the application automatically opens in demo mode.
+Then run `npm run provision:players -- --file=C:\secure\players.json`.
 
-## Supabase setup
+The batch script accepts only these supplied competition usernames:
 
-1. Create a Supabase project.
-2. Run `supabase/migrations/202609300001_initial_schema.sql` in the SQL editor or with the Supabase CLI.
-3. Add the project URL, anon key, and service-role key to `.env.local`.
-4. In Supabase Auth settings, disable public user sign-ups. Player accounts are created only through the protected admin endpoint.
-5. Create the first user in Supabase Auth with `full_name` and `username` metadata, then promote it in SQL:
+`JIHAN_FC7`, `SATanbir1`, `Hie_senberg`, `feroz__2`, `MAHI05`, `Ontikboss`, `kzkm234`, `Ariyan10_Vk`, `Tonmoy2022`, `Rifat061`, `Abir_Talukdar`.
 
-```sql
-update public.profiles set role = 'admin' where email = 'admin@example.com';
-```
+No credential file is committed. Share temporary passwords through a secure channel and have each user change theirs after login.
 
-6. Sign in as that administrator. New players are automatically added to the active season.
+## Tournament model
 
-The service-role key is imported only by `src/lib/supabase/admin.ts`, which is used by server route handlers. Never prefix it with `NEXT_PUBLIC_`.
-
-## Result lifecycle
-
-1. A participating player submits a score.
-2. The fixture becomes pending and immediately affects live standings/statistics.
-3. The opponent confirms or disputes it.
-4. An admin approves, corrects, or rejects it.
-5. Approved/corrected results affect official standings. Rejected results are cleared.
-6. With no pending result, the primary table status returns to **OFFICIAL**.
-
-All standings and analytics are recalculated from fixtures; no increment-only aggregate is used, so score corrections cannot leave stale totals.
+- Players submit `NORMAL`, `WALKOVER`, or `OPPONENT_LEFT` results.
+- The unofficial table includes valid draft/submitted/approved records and updates immediately.
+- The official table includes approved records only.
+- Opponent confirmation/dispute is optional context and never gates Admin approval.
+- Table scores are generated as actual goals + administrative bonus goals.
+- Walkover and opponent-left bonus goals affect GF/GA/GD but not scorer totals.
+- Standings and statistics are recalculated from result records; player totals are never incremented permanently.
+- Reserve Day acceptance rechecks capacity in the transaction. Serialized RPC mutations enforce the per-player limit.
+- Penalty adjustments affect points only and are reversed in place to preserve history.
 
 ## Verification
 
-```bash
-npm test
-npm run lint
-npm run typecheck
-npm run build
+Run `npm run typecheck`, `npm run lint`, `npm test`, and `npm run build`.
+
+Calculation tests cover normal results, walkovers, opponent-left scoring, unofficial/official separation, penalties, statistics, and leaderboards. RLS and transactional RPCs should also be exercised against a disposable Supabase project before production rollout.
+
+## Live tournament setup
+
+Inspect without writing:
+
+```powershell
+node --env-file=.env.local scripts/setup-pro-league-0.mjs --dry-run
 ```
 
-## Important routes
+Apply the idempotent tournament/membership setup:
 
-- `/` public tournament home
-- `/fixtures` filters by matchweek and status
-- `/standings` live/official table toggle
-- `/stats` live/official goal leaderboard
-- `/head-to-head` interactive player comparison
-- `/players/[id]` player profile and opponent goal breakdown
-- `/dashboard` authenticated player workspace
-- `/admin` administrator operations and approval center
+```powershell
+npm run setup:pro-league-0
+```
 
-## Deployment
+The setup never creates profiles, Auth users, fixtures, results, Reserve Days, penalties, or statistics. It reports missing exact usernames and exits non-zero when any are missing.
 
-Deploy to any Node-compatible Next.js host. Set all four values from `.env.example` in the host's encrypted environment configuration, apply the database migration once, and keep the service-role key server-side. The migration adds `fixtures` and `notifications` to the Supabase Realtime publication.
+If the live project still contains the prototype `seasons` schema, apply the migrations in timestamp order. `202610010000_archive_legacy_schema.sql` first verifies that there are no legacy fixtures, then moves the complete prototype into the private `legacy_20260930` schema without deleting it. The clean schema is created next, and `202610010002_migrate_legacy_participants.sql` carries Auth-linked profiles, the current tournament, and memberships forward. Back up the project and apply to staging before production.
+

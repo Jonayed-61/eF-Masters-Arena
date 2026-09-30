@@ -1,44 +1,55 @@
-import Link from "next/link";
-import type { Fixture, Player, Standing } from "@/lib/types";
+import type { ReactNode } from "react";
+import { Inbox, Trophy } from "lucide-react";
+import { labelize } from "@/lib/constants";
 
-export function ClubMark({ player, size = 38 }: { player: Player; size?: number }) {
-  const initials = player.teamName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
-  return <span className="club-mark" style={{ width: size, height: size, fontSize: size * .29 }}>{initials}</span>;
+export function Badge({ children, tone = "neutral" }: { children: ReactNode; tone?: "success" | "warning" | "danger" | "info" | "neutral" }) {
+  return <span className={`badge badge-${tone}`}>{children === "ACTIVE" ? "Ongoing" : children}</span>;
 }
 
 export function StatusBadge({ status }: { status: string }) {
-  const clean = status.toLowerCase();
-  const cls = clean.includes("official") && !clean.includes("unofficial") ? "official" : clean.includes("disput") ? "disputed" : clean.includes("upcoming") ? "upcoming" : "unofficial";
-  return <span className={`pill ${cls}`}>{status.replaceAll("_", " ")}</span>;
+  const tone = ["ACTIVE", "ONGOING", "COMPLETED", "APPROVED", "CONFIRMED"].includes(status) ? "success"
+    : ["SUBMITTED", "PENDING", "PENDING_ADMIN_APPROVAL", "RESULT_SUBMITTED", "RESERVED", "RESCHEDULED"].includes(status) ? "warning"
+    : ["REJECTED", "DISPUTED", "CANCELLED", "INACTIVE"].includes(status) ? "danger" : "neutral";
+  return <Badge tone={tone}>{status === "ACTIVE" ? "Ongoing" : labelize(status)}</Badge>;
 }
 
-export function FormBadges({ form }: { form: ("W" | "D" | "L")[] }) {
-  return <span className="form">{form.length ? form.map((result, index) => <span className={result} key={`${result}-${index}`}>{result}</span>) : <span className="muted">—</span>}</span>;
+export function PageHeader({ eyebrow, title, description, actions }: { eyebrow?: string; title: string; description?: string; actions?: ReactNode }) {
+  return (
+    <header className="page-header">
+      <div>
+        {eyebrow && <p className="eyebrow">{eyebrow}</p>}
+        <h1>{title}</h1>
+        {description && <p className="page-description">{description}</p>}
+      </div>
+      {actions && <div className="page-actions">{actions}</div>}
+    </header>
+  );
 }
 
-export function StandingsTable({ rows, compact = false }: { rows: Standing[]; compact?: boolean }) {
-  return <div className="table-wrap"><table>
-    <thead><tr><th>Pos</th><th>Player</th>{!compact && <><th>P</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th></>}<th>Pts</th>{!compact && <th>Form</th>}</tr></thead>
-    <tbody>{rows.map((row) => <tr key={row.playerId}>
-      <td style={{ fontWeight: 900, color: row.position <= 3 ? "var(--gold)" : undefined }}>{row.position}</td>
-      <td><Link className="player-cell" href={`/players/${row.playerId}`}><span className="club-mark">{row.teamName.slice(0, 2).toUpperCase()}</span><span><strong>{row.playerName}</strong><span>{row.teamName}</span></span></Link></td>
-      {!compact && <><td>{row.played}</td><td>{row.wins}</td><td>{row.draws}</td><td>{row.losses}</td><td>{row.goalsFor}</td><td>{row.goalsAgainst}</td><td style={{ color: row.goalDifference > 0 ? "var(--green)" : row.goalDifference < 0 ? "var(--red)" : undefined }}>{row.goalDifference > 0 ? "+" : ""}{row.goalDifference}</td></>}
-      <td style={{ fontWeight: 950, fontSize: 15 }}>{row.points}</td>{!compact && <td><FormBadges form={row.form} /></td>}
-    </tr>)}</tbody>
-  </table></div>;
+export function SectionHeader({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
+  return (
+    <div className="section-header">
+      <div><h2>{title}</h2>{description && <p>{description}</p>}</div>
+      {action}
+    </div>
+  );
 }
 
-export function FixtureCard({ fixture, players }: { fixture: Fixture; players: Player[] }) {
-  const home = players.find((player) => player.id === fixture.homeUserId)!;
-  const away = players.find((player) => player.id === fixture.awayUserId)!;
-  const played = fixture.homeScore !== null && fixture.awayScore !== null;
-  return <div className="fixture">
-    <div className="team"><span>{home?.name}</span><ClubMark player={home} /></div>
-    <div className="meta"><div className="score">{played ? `${fixture.homeScore} — ${fixture.awayScore}` : "VS"}</div><small>{fixture.matchDate ? new Date(`${fixture.matchDate}T00:00:00`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) : "TBD"} · {fixture.matchTime?.slice(0, 5) ?? "TBD"}</small></div>
-    <div className="team"><ClubMark player={away} /><span>{away?.name}</span></div>
-  </div>;
+export function EmptyState({ title, description, icon = "inbox" }: { title: string; description: string; icon?: "inbox" | "trophy" }) {
+  const Icon = icon === "trophy" ? Trophy : Inbox;
+  return <div className="empty-state"><Icon aria-hidden="true" /><strong>{title}</strong><p>{description}</p></div>;
 }
 
-export function Metric({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
-  return <div className="card stat-card"><div className="label">{label}</div><div className="value" style={{ color: accent }}>{value}</div></div>;
+export function MetricCard({ label, value, note, accent = false }: { label: string; value: ReactNode; note?: string; accent?: boolean }) {
+  return <article className={`metric-card ${accent ? "metric-accent" : ""}`}><span>{label}</span><strong>{value === "ACTIVE" ? "Ongoing" : value}</strong>{note && <small>{note}</small>}</article>;
 }
+
+export function FormMessage({ state }: { state: { ok: boolean; message: string } }) {
+  if (!state.message) return null;
+  return <p className={`form-message ${state.ok ? "form-success" : "form-error"}`} role="status">{state.message}</p>;
+}
+
+export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
+  return <label className="field"><span>{label}</span>{children}{hint && <small>{hint}</small>}</label>;
+}
+
