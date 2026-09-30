@@ -8,7 +8,12 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "provision:admin": "node --env-file=.env.local scripts/provision-admin.mjs",
+    "provision:player": "node --env-file=.env.local scripts/provision-player.mjs",
+    "setup:pro-league-0": "node --env-file=.env.local scripts/setup-pro-league-0.mjs",
+    "provision:tournament": "node --env-file=.env.local scripts/provision-tournament.mjs",
+    "provision:players": "node --env-file=.env.local scripts/provision-players.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
@@ -17,6 +22,7 @@
     "next": "^16.3.7",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "server-only": "^0.0.1",
     "zod": "^4.6.5"
   },
   "devDependencies": {

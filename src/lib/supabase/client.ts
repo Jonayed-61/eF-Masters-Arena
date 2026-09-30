@@ -1,8 +1,15 @@
+"use client";
+
 import { createBrowserClient } from "@supabase/ssr";
 
-export function createClient() {
+let client: ReturnType<typeof createBrowserClient> | undefined;
+
+export function createBrowserSupabaseClient() {
+  if (client) return client;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) return null;
-  return createBrowserClient(url, key);
+  if (!url || !key) throw new Error("Supabase public environment variables are not configured.");
+  client = createBrowserClient(url, key);
+  return client;
 }
+
