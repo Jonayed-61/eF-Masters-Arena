@@ -7,9 +7,9 @@ export function Badge({ children, tone = "neutral" }: { children: ReactNode; ton
 }
 
 export function StatusBadge({ status }: { status: string }) {
-  const tone = ["ACTIVE", "ONGOING", "COMPLETED", "APPROVED", "CONFIRMED"].includes(status) ? "success"
-    : ["SUBMITTED", "PENDING", "PENDING_ADMIN_APPROVAL", "RESULT_SUBMITTED", "RESERVED", "RESCHEDULED"].includes(status) ? "warning"
-    : ["REJECTED", "DISPUTED", "CANCELLED", "INACTIVE"].includes(status) ? "danger" : "neutral";
+  const tone = ["ACTIVE", "ONGOING", "COMPLETED", "APPROVED", "CONFIRMED", "SUBMISSION_OPEN"].includes(status) ? "success"
+    : ["SUBMITTED", "PENDING", "PENDING_ADMIN_APPROVAL", "RESULT_SUBMITTED", "RESERVED", "RESCHEDULED", "POSTPONED"].includes(status) ? "warning"
+    : ["REJECTED", "DISPUTED", "CANCELLED", "INACTIVE", "OVERDUE", "SUBMISSION_CLOSED"].includes(status) ? "danger" : "neutral";
   return <Badge tone={tone}>{status === "ACTIVE" ? "Ongoing" : labelize(status)}</Badge>;
 }
 

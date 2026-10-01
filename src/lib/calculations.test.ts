@@ -16,9 +16,14 @@ describe("tournament source-of-truth calculations", () => {
     expect(calculateGoalLeaderboard(players, [result]).every((row) => row.actual_goals === 0)).toBe(true);
   });
   it("uses 8 for the table and 5 actual goals when opponent leaves", () => {
-    const result: CalculationResult = { ...base, homeActualGoals: 5, awayActualGoals: 1, homeBonusGoals: 3, awayBonusGoals: 0, status: "APPROVED" };
-    expect(calculateOfficialStandings(players, [result], [])[0]).toMatchObject({ goals_for: 8, goals_against: 1 });
+    const result: CalculationResult = { ...base, homeActualGoals: 5, awayActualGoals: 0, homeBonusGoals: 3, awayBonusGoals: 0, status: "APPROVED" };
+    expect(calculateOfficialStandings(players, [result], [])[0]).toMatchObject({ goals_for: 8, goals_against: 0 });
     expect(calculateGoalLeaderboard(players, [result])[0]).toMatchObject({ player_id: "a", actual_goals: 5 });
+  });
+  it("uses 0-7 for an away Player's four goals when the home opponent leaves", () => {
+    const result: CalculationResult = { ...base, homeActualGoals: 0, awayActualGoals: 4, homeBonusGoals: 0, awayBonusGoals: 3, status: "APPROVED" };
+    expect(calculateOfficialStandings(players, [result], [])[0]).toMatchObject({ player_id: "b", goals_for: 7, goals_against: 0 });
+    expect(calculateGoalLeaderboard(players, [result])[0]).toMatchObject({ player_id: "b", actual_goals: 4 });
   });
   it("separates unofficial and official tables", () => {
     const pending: CalculationResult = { ...base, homeActualGoals: 2, awayActualGoals: 1, homeBonusGoals: 0, awayBonusGoals: 0, status: "SUBMITTED" };

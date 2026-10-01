@@ -9,7 +9,7 @@ export default async function AdminDashboardPage() {
   if (!data.tournament || !data.metrics) return <><PageHeader eyebrow="Operations" title="Admin dashboard" description="Tournament control begins when a tournament is activated." /><EmptyState title="No active tournament" description="Apply the clean schema and provision the current tournament before managing operations." /></>;
   const value = (key: string) => data.metrics?.[key] ?? 0;
   return <>
-    <PageHeader eyebrow="Tournament operations" title="Admin dashboard" description={`${data.tournament.name} · Matchweek ${data.tournament.current_matchweek || "—"}`} actions={<Link className="button button-primary" href={`/admin/tournaments/${data.tournament.id}`}>Manage tournament <ArrowRight /></Link>} />
+    <PageHeader eyebrow="Tournament operations" title="Admin dashboard" description={`${data.tournament.name} · Round ${data.tournament.current_matchweek || "—"}`} actions={<Link className="button button-primary" href={`/admin/tournaments/${data.tournament.id}`}>Manage tournament <ArrowRight /></Link>} />
     <div className="metrics-grid metrics-wide">
       <MetricCard label="Status" value="ONGOING" />
       <MetricCard label="Fixture mode" value="MANUAL" />
@@ -20,15 +20,21 @@ export default async function AdminDashboardPage() {
       <MetricCard label="Remaining" value={value("remaining_matches")} />
       <MetricCard label="Pending results" value={value("pending_results")} accent />
       <MetricCard label="Disputed" value={value("disputed_results")} />
-      <MetricCard label="Matchweek" value={value("current_matchweek")} />
+      <MetricCard label="Round" value={value("current_matchweek")} />
       <MetricCard label="Draft table" value={Number(value("pending_results")) ? "UNOFFICIAL" : "CURRENT"} />
       <MetricCard label="Official table" value="APPROVED ONLY" />
       <MetricCard label="Reserve requests" value={value("reserve_requests")} />
     </div>
+    <SectionHeader title="Needs Attention" description="Open operational queues that may require an Admin decision." />
+    <div className="attention-grid">
+      <Link className="attention-card" href="/admin/results"><span>Pending Results</span><strong>{value("pending_results")}</strong><small>Review →</small></Link>
+      <Link className="attention-card" href="/admin/results"><span>Disputes</span><strong>{value("disputed_results")}</strong><small>Review →</small></Link>
+      <Link className="attention-card is-urgent" href="/admin/fixtures"><span>Overdue Fixtures</span><strong>{value("overdue_fixtures")}</strong><small>Resolve →</small></Link>
+      <Link className="attention-card" href={`/admin/tournaments/${data.tournament.id}?tab=reserve-days`}><span>Reserve Requests</span><strong>{value("reserve_requests")}</strong><small>Review →</small></Link>
+    </div>
     <SectionHeader title="Overdue Fixtures" description="Past-date fixtures without a valid result. Future Reserve Day dates are respected." />
-    {data.overdue.length ? <section className="panel result-list">{data.overdue.map((row) => <article className="result-card" key={String(row.id)}><header><strong>{String(row.home_username)} vs {String(row.away_username)}</strong><StatusBadge status="SCHEDULED" /></header><p>{formatDate(String(row.match_date))} · Matchweek {String(row.matchweek)}</p><Link className="button button-danger" href={`/matches/${String(row.id)}`}>Resolve match <ArrowRight /></Link></article>)}</section> : <EmptyState title="No overdue fixtures" description="No fixture currently meets the overdue rule." />}
+    {data.overdue.length ? <section className="panel result-list">{data.overdue.map((row) => <article className="result-card" key={String(row.id)}><header><strong>{String(row.home_username)} vs {String(row.away_username)}</strong><StatusBadge status="OVERDUE" /></header><p>{formatDate(String(row.match_date))} · Round {String(row.matchweek)}</p><Link className="button button-danger" href={`/matches/${String(row.id)}`}>Resolve Match <ArrowRight /></Link></article>)}</section> : <EmptyState title="No overdue fixtures" description="No fixture currently meets the overdue rule." />}
     <SectionHeader title="Pending Result Submissions" />
     {data.pending.length ? <section className="panel result-list">{data.pending.map((result) => <article className="result-card" key={result.id}><strong>{result.fixture.home_player?.username} {result.home_table_score}–{result.away_table_score} {result.fixture.away_player?.username}</strong><p>{result.result_type} · awaiting review</p><Link className="button button-secondary" href="/admin/results">Review result</Link></article>)}</section> : <EmptyState title="No pending submissions" description="Submitted results will appear here immediately." />}
   </>;
 }
-

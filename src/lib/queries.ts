@@ -2,6 +2,7 @@ import "server-only";
 
 import type { Fixture, GoalLeaderRow, Profile, ResultSubmission, StandingRow, Tournament } from "@/lib/types";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { getDhakaCalendarDate, isSubmissionExpired } from "@/lib/submission-window";
 
 interface PublicTournamentSummary extends Tournament {
   player_count: number;
@@ -29,7 +30,7 @@ const fixtureSelect = `
 
 export async function getPlayerDashboard(playerId: string) {
   const supabase = await createServerSupabaseClient();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getDhakaCalendarDate();
   const tournament = await getActiveTournament();
   const [todayResponse, recentResponse] = await Promise.all([
     supabase.from("fixtures").select(fixtureSelect).eq("match_date", today).or(`home_player_id.eq.${playerId},away_player_id.eq.${playerId}`).not("status", "in", "(CANCELLED,COMPLETED)").order("matchweek"),
@@ -127,20 +128,26 @@ export async function getAdminDashboard() {
   const supabase = await createServerSupabaseClient();
   const tournament = await getActiveTournament();
   if (!tournament) return { tournament: null, metrics: null, overdue: [], pending: [], requests: [] };
-  const [metrics, overdue, pending, requests, results] = await Promise.all([
+  const [metrics, fixturesResponse, pending, requests, resultsResponse] = await Promise.all([
     supabase.rpc("admin_dashboard_metrics", { p_tournament_id: tournament.id }).single(),
-    supabase.from("overdue_fixtures").select("*").eq("tournament_id", tournament.id).order("match_date"),
+    supabase.from("fixtures").select(fixtureSelect).eq("tournament_id", tournament.id).order("match_date"),
     supabase.from("result_submissions").select(`*,fixture:fixtures!inner(${fixtureSelect})`).eq("fixtures.tournament_id", tournament.id).eq("status", "SUBMITTED").order("submitted_at"),
     supabase.from("reserve_day_requests").select("*,fixture:fixtures!inner(*),requester:profiles!reserve_day_requests_requested_by_fkey(username),reserve_day:reserve_days(*)").eq("fixtures.tournament_id", tournament.id).eq("status", "PENDING").order("created_at"),
-    supabase.from("result_submissions").select("id,fixtures!inner(tournament_id)", { count: "exact", head: true }).eq("fixtures.tournament_id", tournament.id),
+    supabase.from("result_submissions").select("id,fixture_id,status,fixtures!inner(tournament_id)", { count: "exact" }).eq("fixtures.tournament_id", tournament.id),
   ]);
+  const resolved = new Set((resultsResponse.data ?? []).filter((result) => ["DRAFT", "SUBMITTED", "APPROVED"].includes(result.status)).map((result) => result.fixture_id));
+  const overdue = ((fixturesResponse.data ?? []) as unknown as Fixture[]).filter((fixture) =>
+    !["COMPLETED", "POSTPONED", "CANCELLED", "RESERVED"].includes(fixture.status)
+    && !resolved.has(fixture.id)
+    && isSubmissionExpired(fixture.match_date));
+  const dashboardMetrics = metrics.data ? { ...metrics.data, overdue_fixtures: overdue.length } : null;
   return {
     tournament,
-    metrics: metrics.data as Record<string, number | string> | null,
-    overdue: (overdue.data ?? []) as Array<Record<string, unknown>>,
+    metrics: dashboardMetrics as Record<string, number | string> | null,
+    overdue: overdue.map((fixture) => ({ ...fixture, home_username: fixture.home_player?.username, away_username: fixture.away_player?.username })) as Array<Record<string, unknown>>,
     pending: (pending.data ?? []) as unknown as Array<ResultSubmission & { fixture: Fixture }>,
     requests: (requests.data ?? []) as Array<Record<string, unknown>>,
-    results: results.count ?? 0,
+    results: resultsResponse.count ?? 0,
   };
 }
 

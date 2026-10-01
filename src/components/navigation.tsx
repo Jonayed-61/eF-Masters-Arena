@@ -1,33 +1,18 @@
 import Link from "next/link";
-import { CalendarDays, ChartNoAxesColumn, CircleUserRound, ClipboardCheck, LayoutDashboard, ListChecks, Menu, ShieldCheck, Trophy, Users } from "lucide-react";
+import { CircleUserRound, ListChecks, ShieldCheck, Trophy, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import type { Viewer } from "@/lib/types";
 import { BrandLogo } from "@/components/brand-logo";
 import { signOutAction } from "@/app/actions";
-
-const playerLinks = [
-  { href: "/player/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/player/tournaments", label: "Tournaments", icon: Trophy },
-  { href: "/player/matches", label: "Matches", icon: CalendarDays },
-  { href: "/player/statistics", label: "Stats", icon: ChartNoAxesColumn },
-  { href: "/player/profile", label: "Profile", icon: CircleUserRound },
-];
-
-const adminLinks = [
-  { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/tournament", label: "Tournament", icon: Trophy },
-  { href: "/admin/results", label: "Results", icon: ClipboardCheck },
-  { href: "/admin/fixtures", label: "Fixtures", icon: CalendarDays },
-  { href: "/admin/more", label: "More", icon: Menu },
-];
+import { NavLinks } from "@/components/nav-links";
 
 export function AppShell({ viewer, children }: { viewer: Viewer; children: ReactNode }) {
-  const links = viewer.profile.role === "ADMIN" ? adminLinks : playerLinks;
+  const homeHref = viewer.profile.role === "ADMIN" ? "/admin/dashboard" : "/player/dashboard";
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <Link className="brand-lockup" href={links[0].href}><BrandLogo size={46} priority /><span><b>eF Masters</b><small>Arena</small></span></Link>
-        <nav aria-label="Primary navigation">{links.map(({ href, label, icon: Icon }) => <Link key={href} href={href}><Icon />{label}</Link>)}</nav>
+        <Link className="brand-lockup" href={homeHref}><BrandLogo size={46} priority /><span><b>eF Masters</b><small>Arena</small></span></Link>
+        <nav aria-label="Primary navigation"><NavLinks role={viewer.profile.role} /></nav>
         <div className="sidebar-account">
           <div className="account-avatar">{viewer.profile.username.slice(0, 2).toUpperCase()}</div>
           <div><strong>{viewer.profile.username}</strong><small>{viewer.profile.role}</small></div>
@@ -38,7 +23,7 @@ export function AppShell({ viewer, children }: { viewer: Viewer; children: React
         <div className="mobile-topbar"><BrandLogo size={38} /><div><b>eF Masters Arena</b><small>{viewer.profile.username}</small></div><ShieldCheck aria-label={viewer.profile.role} /></div>
         <div className="page-container">{children}</div>
       </main>
-      <nav className="bottom-nav" aria-label="Mobile navigation">{links.map(({ href, label, icon: Icon }) => <Link key={href} href={href}><Icon /><span>{label}</span></Link>)}</nav>
+      <nav className="bottom-nav" aria-label="Mobile navigation"><NavLinks role={viewer.profile.role} /></nav>
     </div>
   );
 }

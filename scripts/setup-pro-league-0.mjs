@@ -143,7 +143,7 @@ function printSummary({ schema, inspection, profileInspection, after, mode }) {
   console.log(`Current status: ${after?.tournament?.status ?? inspection.tournament?.status ?? "NOT CREATED"}`);
   console.log(`Organizer: ${after?.tournament?.organizer ?? inspection.tournament?.organizer ?? ORGANIZER}`);
   console.log(`Start date: ${after?.tournament?.start_date ?? inspection.tournament?.start_date ?? "NOT SET"}`);
-  console.log(`Current matchweek: ${after?.tournament?.current_matchweek ?? inspection.tournament?.current_matchweek ?? "NOT SET"}`);
+  console.log(`Current round: ${after?.tournament?.current_matchweek ?? inspection.tournament?.current_matchweek ?? "NOT SET"}`);
   console.log(`Profiles found: ${profileInspection.profiles.length}`);
   console.log(`Participants assigned: ${after?.memberships ?? inspection.memberships}`);
   console.log(`Missing Players: ${profileInspection.missing.length ? profileInspection.missing.join(", ") : "0"}`);

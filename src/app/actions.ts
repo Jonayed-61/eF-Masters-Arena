@@ -5,14 +5,42 @@ import { redirect } from "next/navigation";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { requireViewer, safeReturnPath } from "@/lib/auth";
+import { formatDate } from "@/lib/constants";
+import type { Fixture } from "@/lib/types";
+import { getSubmissionState } from "@/lib/submission-window";
 import {
   fixtureSchema, loginSchema, passwordSchema, penaltySchema, profileSchema, reserveDaySchema,
   reserveRequestSchema, resultResponseSchema, resultSchema, reviewSchema,
 } from "@/lib/validation";
 
 export interface ActionState { ok: boolean; message: string }
-const initialError = (message: string): ActionState => ({ ok: false, message });
+const initialError = (message: string): ActionState => {
+  const internal = /(sqlstate|pgrst|postgres|duplicate key|violates .*constraint|relation .* does not exist|function .* does not exist|operator does not exist|invalid input syntax|column .* does not exist|permission denied|authapierror|\{\s*"(?:code|message)")/i.test(message);
+  return { ok: false, message: internal ? "Something went wrong while saving. Please refresh and try again." : message };
+};
 const success = (message: string): ActionState => ({ ok: true, message });
+const isLegacyFixtureStatusEnumError = (message: string) => message.includes("function lower(fixture_status) does not exist");
+const friendlyError = (error: { message?: string } | null, fallback: string) => {
+  const message = error?.message ?? "";
+  const safeMessages = [
+    "The submission deadline has passed", "Result submission is not open yet", "A current result already exists",
+    "Reserve Day capacity reached", "This fixture cannot accept a result", "Result is no longer awaiting review",
+    "Rejection reason is required", "Player is not in tournament", "Penalty already reversed",
+  ];
+  return safeMessages.find((item) => message.includes(item)) ?? fallback;
+};
+
+function normalizedScores(value: { resultType: string; homeActualGoals: number; awayActualGoals: number; bonusSide: string }, submittingSide?: "HOME" | "AWAY") {
+  if (value.resultType === "NORMAL") return { homeActualGoals: value.homeActualGoals, awayActualGoals: value.awayActualGoals, homeBonusGoals: 0, awayBonusGoals: 0 };
+  const awardedSide = value.resultType === "OPPONENT_LEFT" && submittingSide ? submittingSide : value.bonusSide;
+  if (value.resultType === "WALKOVER") return { homeActualGoals: 0, awayActualGoals: 0, homeBonusGoals: awardedSide === "HOME" ? 3 : 0, awayBonusGoals: awardedSide === "AWAY" ? 3 : 0 };
+  return {
+    homeActualGoals: awardedSide === "HOME" ? value.homeActualGoals : 0,
+    awayActualGoals: awardedSide === "AWAY" ? value.awayActualGoals : 0,
+    homeBonusGoals: awardedSide === "HOME" ? 3 : 0,
+    awayBonusGoals: awardedSide === "AWAY" ? 3 : 0,
+  };
+}
 
 export async function loginAction(_state: ActionState, formData: FormData): Promise<ActionState> {
   const parsed = loginSchema.safeParse(Object.fromEntries(formData));
@@ -48,20 +76,26 @@ export async function signOutAction() {
 }
 
 export async function submitResultAction(_state: ActionState, formData: FormData): Promise<ActionState> {
-  await requireViewer("PLAYER");
+  const viewer = await requireViewer("PLAYER");
   const parsed = resultSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return initialError(parsed.error.issues[0]?.message ?? "Invalid result.");
-  const { fixtureId, resultType, homeActualGoals, awayActualGoals, bonusSide } = parsed.data;
   const supabase = await createServerSupabaseClient();
+  const { data: fixture, error: fixtureError } = await supabase.from("fixtures").select("id,match_date,status,home_player_id,away_player_id").eq("id", parsed.data.fixtureId).maybeSingle();
+  if (fixtureError || !fixture || ![fixture.home_player_id, fixture.away_player_id].includes(viewer.userId)) return initialError("This fixture is unavailable.");
+  const submissionState = getSubmissionState(fixture.match_date, fixture.status);
+  if (submissionState === "UPCOMING") return initialError("Result submission is not open yet.");
+  if (submissionState === "CLOSED") return initialError("The submission deadline has passed. Tournament administration will resolve this fixture.");
+  if (submissionState !== "OPEN") return initialError("This fixture cannot accept a Player result.");
+  const scores = normalizedScores(parsed.data, viewer.userId === fixture.home_player_id ? "HOME" : "AWAY");
   const { error } = await supabase.rpc("submit_result", {
-    p_fixture_id: fixtureId,
-    p_result_type: resultType,
-    p_home_actual_goals: homeActualGoals,
-    p_away_actual_goals: awayActualGoals,
-    p_home_bonus_goals: bonusSide === "HOME" ? 3 : 0,
-    p_away_bonus_goals: bonusSide === "AWAY" ? 3 : 0,
+    p_fixture_id: parsed.data.fixtureId,
+    p_result_type: parsed.data.resultType,
+    p_home_actual_goals: scores.homeActualGoals,
+    p_away_actual_goals: scores.awayActualGoals,
+    p_home_bonus_goals: scores.homeBonusGoals,
+    p_away_bonus_goals: scores.awayBonusGoals,
   });
-  if (error) return initialError(error.message);
+  if (error) return initialError(friendlyError(error, "Result could not be submitted. Please refresh and try again."));
   revalidatePath("/tournaments", "layout");
   return success("Result submitted. The unofficial table has been updated for Admin review.");
 }
@@ -235,14 +269,15 @@ export async function adminEnterResultAction(_state: ActionState, formData: Form
   if (!parsed.success) return initialError(parsed.error.issues[0]?.message ?? "Invalid result.");
   if (!reason) return initialError("An administrative reason is required.");
   const value = parsed.data;
+  const scores = normalizedScores(value);
   const supabase = await createServerSupabaseClient();
   const { error } = await supabase.rpc("admin_enter_result", {
     p_fixture_id: value.fixtureId, p_result_type: value.resultType,
-    p_home_actual_goals: value.homeActualGoals, p_away_actual_goals: value.awayActualGoals,
-    p_home_bonus_goals: value.bonusSide === "HOME" ? 3 : 0, p_away_bonus_goals: value.bonusSide === "AWAY" ? 3 : 0,
+    p_home_actual_goals: scores.homeActualGoals, p_away_actual_goals: scores.awayActualGoals,
+    p_home_bonus_goals: scores.homeBonusGoals, p_away_bonus_goals: scores.awayBonusGoals,
     p_final: final, p_reason: reason,
   });
-  if (error) return initialError(error.message);
+  if (error) return initialError(friendlyError(error, "The administrative result could not be saved."));
   revalidatePath("/", "layout");
   return success(final ? "Final result entered and approved." : "Draft result entered into the unofficial table.");
 }
@@ -282,17 +317,154 @@ export async function reversePenaltyAction(_state: ActionState, formData: FormDa
 }
 
 export async function updateFixtureStatusAction(_state: ActionState, formData: FormData): Promise<ActionState> {
-  await requireViewer("ADMIN");
+  const viewer = await requireViewer("ADMIN");
   const fixtureId = String(formData.get("fixtureId") ?? "");
   const status = String(formData.get("status") ?? "");
-  const matchDate = String(formData.get("matchDate") ?? "") || null;
+  const requestedDate = String(formData.get("matchDate") ?? "");
+  const matchDate = requestedDate || null;
   const reason = String(formData.get("reason") ?? "").trim();
-  if (!/^[0-9a-f-]{36}$/i.test(fixtureId) || !["POSTPONED", "RESCHEDULED", "CANCELLED", "RESERVED", "SCHEDULED"].includes(status) || !reason) return initialError("Fixture, status, and reason are required.");
+  if (!/^[0-9a-f-]{36}$/i.test(fixtureId) || !["POSTPONED", "RESCHEDULED", "CANCELLED", "SCHEDULED"].includes(status) || !reason) return initialError("Fixture, status, and reason are required.");
+  if (["SCHEDULED", "RESCHEDULED"].includes(status) && !/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) return initialError("Select a valid date.");
   const supabase = await createServerSupabaseClient();
+  const { data: fixture } = await supabase.from("fixtures").select("status").eq("id", fixtureId).maybeSingle();
+  if (!fixture) return initialError("Fixture not found.");
+  if (!["SCHEDULED", "POSTPONED", "RESCHEDULED", "RESERVED"].includes(fixture.status)) return initialError("This fixture requires a protected administrative workflow before it can be changed.");
   const { error } = await supabase.rpc("admin_update_fixture_status", { p_fixture_id: fixtureId, p_status: status, p_match_date: matchDate, p_reason: reason });
-  if (error) return initialError(error.message);
+  if (error) {
+    if (!isLegacyFixtureStatusEnumError(error.message)) return initialError(error.message);
+
+    // Compatibility path until migration 003 reaches the database. The RPC
+    // failure rolls back its transaction before these equivalent writes run.
+    const admin = createAdminSupabaseClient();
+    const { data: oldFixture, error: oldFixtureError } = await admin.from("fixtures").select("*").eq("id", fixtureId).single();
+    if (oldFixtureError || !oldFixture) return initialError(oldFixtureError?.message ?? "Fixture not found.");
+
+    if (matchDate) {
+      const { data: availability, error: availabilityError } = await supabase.rpc("reserve_day_availability", { p_fixture_id: fixtureId });
+      if (availabilityError) return initialError(availabilityError.message);
+      const selectedReserveDay = (availability ?? []).find((row: Record<string, unknown>) => String(row.reserve_date) === matchDate) as Record<string, unknown> | undefined;
+      if (selectedReserveDay && !Boolean(selectedReserveDay.available)) return initialError("Reserve Day capacity reached for one or both players.");
+    }
+
+    const { data: updatedFixture, error: fallbackError } = await admin
+      .from("fixtures")
+      .update({ status, match_date: matchDate ?? oldFixture.match_date })
+      .eq("id", fixtureId)
+      .select("*")
+      .single();
+    if (fallbackError) return initialError(fallbackError.message);
+
+    const recipients = [oldFixture.home_player_id, oldFixture.away_player_id].map((userId) => ({
+      user_id: userId,
+      type: `FIXTURE_${status}`,
+      title: `Fixture ${status.toLowerCase()}`,
+      message: reason,
+      target_type: "fixture",
+      target_id: fixtureId,
+    }));
+    const { error: notificationError } = await admin.from("notifications").insert(recipients);
+    if (notificationError) return initialError(`Fixture was updated, but Player notification failed: ${notificationError.message}`);
+
+    const { error: auditError } = await admin.from("audit_logs").insert({
+      actor_id: viewer.userId,
+      tournament_id: oldFixture.tournament_id,
+      action: `FIXTURE_${status}`,
+      target_type: "fixture",
+      target_id: fixtureId,
+      old_data: oldFixture,
+      new_data: updatedFixture,
+      reason,
+    });
+    if (auditError) return initialError(`Fixture was updated, but audit logging failed: ${auditError.message}`);
+  }
   revalidatePath("/", "layout");
   return success("Fixture updated and affected players notified.");
+}
+
+export async function adminRescheduleToReserveDayAction(_state: ActionState, formData: FormData): Promise<ActionState> {
+  const viewer = await requireViewer("ADMIN");
+  const fixtureId = String(formData.get("fixtureId") ?? "");
+  const reserveDayId = String(formData.get("reserveDayId") ?? "");
+  const reason = String(formData.get("reason") ?? "").trim() || "Administrative Reserve Day reschedule";
+  if (!/^[0-9a-f-]{36}$/i.test(fixtureId) || !/^[0-9a-f-]{36}$/i.test(reserveDayId) || reason.length > 500) return initialError("Select a valid fixture and Reserve Day.");
+
+  const supabase = await createServerSupabaseClient();
+  const { data: fixtureData, error: fixtureError } = await supabase.from("fixtures").select("*,tournament:tournaments(name),home_player:profiles!fixtures_home_player_id_fkey(username),away_player:profiles!fixtures_away_player_id_fkey(username)").eq("id", fixtureId).maybeSingle();
+  if (fixtureError || !fixtureData) return initialError(fixtureError?.message ?? "Fixture not found.");
+  const fixture = fixtureData as unknown as Fixture & {
+    tournament: { name: string };
+    home_player: { username: string };
+    away_player: { username: string };
+  };
+  if (!["SCHEDULED", "POSTPONED", "RESCHEDULED", "RESERVED"].includes(fixture.status)) return initialError("Completed, cancelled, or result-pending fixtures require a protected administrative workflow.");
+
+  const { data: availability, error: availabilityError } = await supabase.rpc("reserve_day_availability", { p_fixture_id: fixtureId });
+  if (availabilityError) return initialError(availabilityError.message);
+  const reserveDay = (availability ?? []).find((row: Record<string, unknown>) => String(row.reserve_day_id) === reserveDayId) as Record<string, unknown> | undefined;
+  if (!reserveDay) return initialError("Select an active future Reserve Day configured for this tournament.");
+  if (!Boolean(reserveDay.available)) {
+    const maximum = Number(reserveDay.max_matches_per_player);
+    const homeFull = Number(reserveDay.home_match_count) >= maximum;
+    const awayFull = Number(reserveDay.away_match_count) >= maximum;
+    return initialError(homeFull && awayFull
+      ? "Both players already have the maximum matches on this Reserve Day."
+      : homeFull
+        ? "Home Player already has 2 matches on this Reserve Day."
+        : "Away Player already has 2 matches on this Reserve Day.");
+  }
+
+  const reserveDate = String(reserveDay.reserve_date);
+  const notificationStartedAt = new Date(Date.now() - 5_000).toISOString();
+  const admin = createAdminSupabaseClient();
+  const { error: updateError } = await supabase.rpc("admin_update_fixture_status", {
+    p_fixture_id: fixtureId,
+    p_status: "RESCHEDULED",
+    p_match_date: reserveDate,
+    p_reason: reason,
+  });
+  if (updateError) {
+    if (!isLegacyFixtureStatusEnumError(updateError.message)) return initialError(updateError.message);
+
+    // Compatibility path for databases that have not received migration 003 yet.
+    // The failed RPC is transactional, so its partial update has already rolled back.
+    const { error: fallbackError } = await admin
+      .from("fixtures")
+      .update({ status: "RESCHEDULED", match_date: reserveDate })
+      .eq("id", fixtureId);
+    if (fallbackError) return initialError(fallbackError.message);
+  }
+
+  const { data: updatedFixture, error: updatedError } = await admin.from("fixtures").select("*").eq("id", fixtureId).single();
+  if (updatedError) return initialError(`Fixture was moved, but verification failed: ${updatedError.message}`);
+  const { error: auditError } = await admin.from("audit_logs").insert({
+    actor_id: viewer.userId,
+    tournament_id: fixture.tournament_id,
+    action: "ADMIN_RESCHEDULE_TO_RESERVE_DAY",
+    target_type: "fixture",
+    target_id: fixtureId,
+    old_data: fixture,
+    new_data: { ...updatedFixture, reserve_day_id: reserveDayId, reschedule_source: "ADMIN" },
+    reason,
+  });
+  if (auditError) return initialError(`Fixture was moved, but its detailed audit entry failed: ${auditError.message}`);
+
+  const { data: generatedNotifications } = await admin.from("notifications").select("id,user_id").eq("target_type", "fixture").eq("target_id", fixtureId).eq("type", "FIXTURE_RESCHEDULED").gte("created_at", notificationStartedAt);
+  const recipients = [
+    { id: fixture.home_player_id, opponent: fixture.away_player.username },
+    { id: fixture.away_player_id, opponent: fixture.home_player.username },
+  ];
+  for (const recipient of recipients) {
+    const message = `Your match against ${recipient.opponent} in ${fixture.tournament.name} (Round ${fixture.matchweek}) has been rescheduled by the tournament administrator to Reserve Day — ${formatDate(reserveDate)}.`;
+    const generated = generatedNotifications?.find((notification) => notification.user_id === recipient.id);
+    const notificationMutation = generated
+      ? admin.from("notifications").update({ type: "ADMIN_RESCHEDULE_TO_RESERVE_DAY", title: "Match rescheduled to Reserve Day", message }).eq("id", generated.id)
+      : admin.from("notifications").insert({ user_id: recipient.id, type: "ADMIN_RESCHEDULE_TO_RESERVE_DAY", title: "Match rescheduled to Reserve Day", message, target_type: "fixture", target_id: fixtureId });
+    const { error: notificationError } = await notificationMutation;
+    if (notificationError) return initialError(`Fixture was moved, but a Player notification failed: ${notificationError.message}`);
+  }
+
+  revalidatePath("/", "layout");
+  return success(`Fixture rescheduled to Reserve Day ${formatDate(reserveDate)}. Both Players were notified.`);
 }
 
 export async function updateTournamentAction(_state: ActionState, formData: FormData): Promise<ActionState> {

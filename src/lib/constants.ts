@@ -31,14 +31,12 @@ export const FIXTURE_STATUSES: FixtureStatus[] = [
 
 export const RESULT_TYPES: ResultType[] = ["NORMAL", "WALKOVER", "OPPONENT_LEFT"];
 
-export const formatDate = (value: string) =>
-  new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(`${value}T00:00:00Z`));
+export const formatDate = (value: string) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!match) return value;
+  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" })
+    .format(new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))));
+};
 
 export const labelize = (value: string) =>
   value.toLowerCase().replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase());
-
