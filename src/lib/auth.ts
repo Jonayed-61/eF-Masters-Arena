@@ -7,17 +7,25 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 export const getViewer = cache(async (): Promise<Viewer | null> => {
   const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.email) return null;
+  const { data, error } = await supabase.auth.getClaims();
+  const userId = data?.claims.sub;
+  const email = data?.claims.email;
+  if (error || typeof userId !== "string" || typeof email !== "string") return null;
 
-  const { data } = await supabase.from("profiles").select("*").eq("id", user.id).single();
-  if (!data || String(data.status).toUpperCase() !== "ACTIVE") return null;
-  const profile = {
-    ...data,
-    role: String(data.role).toUpperCase(),
-    status: String(data.status).toUpperCase(),
+  const { data: profileData } = await supabase.from("profiles").select("*").eq("id", userId).single();
+  if (!profileData || String(profileData.status).toUpperCase() !== "ACTIVE") return null;
+  const profile: Profile = {
+    id: String(profileData.id),
+    email: String(profileData.email),
+    username: String(profileData.username),
+    team_name: typeof profileData.team_name === "string" ? profileData.team_name : null,
+    avatar_url: typeof profileData.avatar_url === "string" ? profileData.avatar_url : null,
+    role: String(profileData.role).toUpperCase(),
+    status: String(profileData.status).toUpperCase(),
+    created_at: String(profileData.created_at),
+    updated_at: String(profileData.updated_at),
   } as Profile;
-  return { userId: user.id, email: user.email, profile };
+  return { userId, email, profile };
 });
 
 export async function requireViewer(role?: Role, returnTo?: string) {

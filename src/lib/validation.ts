@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { FIXTURE_STATUSES, RESULT_TYPES } from "@/lib/constants";
+import { FIXTURE_STATUSES, RESULT_TYPES } from "./constants";
 
 export const loginSchema = z.object({
   identifier: z.string().trim().min(2).max(254),
@@ -24,6 +24,12 @@ export const resultSchema = z.object({
   }
   if (value.resultType !== "NORMAL" && value.bonusSide === "NONE") {
     context.addIssue({ code: "custom", path: ["bonusSide"], message: "Select the side receiving the three-goal administrative award." });
+  }
+  if (value.resultType === "OPPONENT_LEFT" && value.bonusSide === "HOME" && value.awayActualGoals !== 0) {
+    context.addIssue({ code: "custom", path: ["awayActualGoals"], message: "The opponent score must be zero when the opponent leaves." });
+  }
+  if (value.resultType === "OPPONENT_LEFT" && value.bonusSide === "AWAY" && value.homeActualGoals !== 0) {
+    context.addIssue({ code: "custom", path: ["homeActualGoals"], message: "The opponent score must be zero when the opponent leaves." });
   }
 });
 

@@ -91,7 +91,7 @@ create table public.result_submissions (
   check (
     (result_type = 'NORMAL' and home_bonus_goals = 0 and away_bonus_goals = 0)
     or (result_type = 'WALKOVER' and home_actual_goals = 0 and away_actual_goals = 0 and ((home_bonus_goals = 3 and away_bonus_goals = 0) or (home_bonus_goals = 0 and away_bonus_goals = 3)))
-    or (result_type = 'OPPONENT_LEFT' and ((home_bonus_goals = 3 and away_bonus_goals = 0) or (home_bonus_goals = 0 and away_bonus_goals = 3)))
+    or (result_type = 'OPPONENT_LEFT' and ((home_bonus_goals = 3 and away_bonus_goals = 0 and away_actual_goals = 0) or (home_bonus_goals = 0 and away_bonus_goals = 3 and home_actual_goals = 0)))
   ),
   check ((status = 'APPROVED' and approved_by is not null and approved_at is not null) or status <> 'APPROVED')
 );
@@ -371,7 +371,8 @@ $$;
 create or replace view public.overdue_fixtures with (security_invoker=true) as
 select f.*,hp.username home_username,ap.username away_username
 from public.fixtures f join public.profiles hp on hp.id=f.home_player_id join public.profiles ap on ap.id=f.away_player_id
-where f.match_date < current_date and f.status not in ('COMPLETED','POSTPONED','CANCELLED','RESERVED')
+where clock_timestamp() >= ((f.match_date + 1)::timestamp at time zone 'Asia/Dhaka')
+  and f.status not in ('COMPLETED','POSTPONED','CANCELLED','RESERVED')
   and not exists(select 1 from public.result_submissions r where r.fixture_id=f.id and r.status in('DRAFT','SUBMITTED','APPROVED'));
 
 create or replace function public.admin_dashboard_metrics(p_tournament_id uuid)
@@ -406,8 +407,24 @@ declare v_fixture public.fixtures; v_id uuid; v_opponent uuid;
 begin
   select * into v_fixture from public.fixtures where id=p_fixture_id for update;
   if auth.uid() is null or not found or auth.uid() not in(v_fixture.home_player_id,v_fixture.away_player_id) then raise exception 'You are not a participant in this fixture'; end if;
-  if v_fixture.status in('COMPLETED','CANCELLED') then raise exception 'This fixture cannot accept a result'; end if;
+  if v_fixture.status not in('SCHEDULED','RESCHEDULED','RESERVED') then raise exception 'This fixture cannot accept a result'; end if;
+  if clock_timestamp() < (v_fixture.match_date::timestamp at time zone 'Asia/Dhaka') then raise exception 'Result submission is not open yet'; end if;
+  if clock_timestamp() >= ((v_fixture.match_date + 1)::timestamp at time zone 'Asia/Dhaka') then raise exception 'The submission deadline has passed'; end if;
   if exists(select 1 from public.result_submissions where fixture_id=p_fixture_id and status in('DRAFT','SUBMITTED','APPROVED')) then raise exception 'A current result already exists for this fixture'; end if;
+  if p_result_type='NORMAL' then
+    p_home_bonus_goals:=0; p_away_bonus_goals:=0;
+  elsif p_result_type='WALKOVER' then
+    p_home_actual_goals:=0; p_away_actual_goals:=0;
+    if (p_home_bonus_goals=3)=(p_away_bonus_goals=3) then raise exception 'Select one Walkover winner'; end if;
+    p_home_bonus_goals:=case when p_home_bonus_goals=3 then 3 else 0 end;
+    p_away_bonus_goals:=case when p_away_bonus_goals=3 then 3 else 0 end;
+  elsif p_result_type='OPPONENT_LEFT' then
+    if auth.uid()=v_fixture.home_player_id then
+      p_away_actual_goals:=0; p_home_bonus_goals:=3; p_away_bonus_goals:=0;
+    else
+      p_home_actual_goals:=0; p_home_bonus_goals:=0; p_away_bonus_goals:=3;
+    end if;
+  end if;
   insert into public.result_submissions(fixture_id,submitted_by,result_type,home_actual_goals,away_actual_goals,home_bonus_goals,away_bonus_goals,status)
     values(p_fixture_id,auth.uid(),p_result_type,p_home_actual_goals,p_away_actual_goals,p_home_bonus_goals,p_away_bonus_goals,'SUBMITTED') returning id into v_id;
   update public.fixtures set status='PENDING_ADMIN_APPROVAL' where id=p_fixture_id;
@@ -603,8 +620,8 @@ begin perform public.assert_admin(); select * into v_old from public.fixtures wh
   end if;
   update public.fixtures set status=p_status,match_date=coalesce(p_match_date,match_date) where id=p_fixture_id;
   insert into public.notifications(user_id,type,title,message,target_type,target_id)
-    select player_id,'FIXTURE_'||p_status,'Fixture '||lower(p_status),p_reason,'fixture',p_fixture_id from public.tournament_players where tournament_id=v_old.tournament_id and player_id in(v_old.home_player_id,v_old.away_player_id);
-  insert into public.audit_logs(actor_id,tournament_id,action,target_type,target_id,old_data,new_data,reason) values(auth.uid(),v_old.tournament_id,'FIXTURE_'||p_status,'fixture',p_fixture_id,to_jsonb(v_old),(select to_jsonb(f) from public.fixtures f where f.id=p_fixture_id),p_reason);
+    select player_id,'FIXTURE_'||p_status::text,'Fixture '||lower(p_status::text),p_reason,'fixture',p_fixture_id from public.tournament_players where tournament_id=v_old.tournament_id and player_id in(v_old.home_player_id,v_old.away_player_id);
+  insert into public.audit_logs(actor_id,tournament_id,action,target_type,target_id,old_data,new_data,reason) values(auth.uid(),v_old.tournament_id,'FIXTURE_'||p_status::text,'fixture',p_fixture_id,to_jsonb(v_old),(select to_jsonb(f) from public.fixtures f where f.id=p_fixture_id),p_reason);
 end; $$;
 
 create or replace function public.admin_update_tournament(p_tournament_id uuid,p_name text,p_organizer text,p_status public.tournament_status,p_start_date date,p_end_date date,p_current_matchweek integer)
