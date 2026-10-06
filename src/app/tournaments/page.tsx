@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { TournamentCard } from "@/components/TournamentCard";
 import { Trophy, Search, Filter } from "lucide-react";
 import Link from "next/link";
+import { TournamentStatus } from "@prisma/client";
 
 export const revalidate = 0;
 
@@ -12,8 +13,8 @@ export default async function TournamentsCatalogPage({
 }) {
   const { status, feeType, q } = await searchParams;
 
-  const whereClause: Record<string, unknown> = {};
-  if (status) whereClause.status = status;
+  const whereClause: Record<string, unknown> = { status: { not: TournamentStatus.DRAFT } };
+  if (status && Object.values(TournamentStatus).includes(status as TournamentStatus) && status !== TournamentStatus.DRAFT) whereClause.status = status;
   if (feeType === "free") whereClause.entryFee = 0;
   if (feeType === "paid") whereClause.entryFee = { gt: 0 };
   if (q) {
@@ -45,11 +46,11 @@ export default async function TournamentsCatalogPage({
   });
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+    <div className="page-container">
       {/* Header Banner */}
-      <div className="p-8 rounded-3xl bg-slate-900 border border-slate-800 space-y-2">
-        <h1 className="text-3xl font-black text-white flex items-center gap-2">
-          <Trophy className="w-8 h-8 text-cyan-400" /> Tournament Catalog
+      <div className="page-hero space-y-2">
+        <h1 className="flex items-start gap-2 break-words text-2xl font-black text-white sm:items-center sm:text-3xl">
+          <Trophy className="mt-0.5 h-7 w-7 shrink-0 text-cyan-400 sm:h-8 sm:w-8" /> Tournament Catalog
         </h1>
         <p className="text-xs sm:text-sm text-slate-400">
           Browse, filter, and register for official eFootball Mobile competitive tournaments.
@@ -99,12 +100,12 @@ export default async function TournamentsCatalogPage({
             Registration Open
           </Link>
           <Link
-            href="/tournaments?status=ONGOING"
+            href="/tournaments?status=GROUP_STAGE"
             className={`px-3 py-1 rounded-xl transition-all ${
-              status === "ONGOING" ? "bg-cyan-500 text-black font-extrabold" : "bg-slate-950 border border-slate-800 text-slate-400 hover:text-white"
+              status === "GROUP_STAGE" ? "bg-cyan-500 text-black font-extrabold" : "bg-slate-950 border border-slate-800 text-slate-400 hover:text-white"
             }`}
           >
-            Matches Live
+            Group Stage
           </Link>
           <Link
             href="/tournaments?status=UPCOMING"
@@ -127,7 +128,7 @@ export default async function TournamentsCatalogPage({
 
       {/* Tournaments Grid */}
       {enrichedTournaments.length === 0 ? (
-        <div className="p-12 rounded-3xl bg-slate-900 border border-slate-800 text-center space-y-3">
+        <div className="space-y-3 rounded-3xl border border-slate-800 bg-slate-900 p-8 text-center sm:p-12">
           <Trophy className="w-12 h-12 text-slate-600 mx-auto" />
           <h3 className="text-lg font-bold text-white">No Tournaments Found</h3>
           <p className="text-xs text-slate-400">Try adjusting your search query or status filter.</p>

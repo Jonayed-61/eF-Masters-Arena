@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { Trophy, Shield, Home, User, Sparkles } from "lucide-react";
 import { UserSession } from "./Navbar";
 
-export function BottomNav({ currentUser }: { currentUser: UserSession | null }) {
+export function BottomNav({ currentUser, onOpenAuth }: { currentUser: UserSession | null; onOpenAuth: () => void }) {
   const pathname = usePathname();
 
   const navItems = [
@@ -15,31 +15,36 @@ export function BottomNav({ currentUser }: { currentUser: UserSession | null }) 
     { label: "Hall of Fame", href: "/hall-of-fame", icon: Sparkles },
     {
       label: currentUser ? "Profile" : "Sign In",
-      href: currentUser ? `/players/${currentUser.profile?.username || currentUser.email}` : "/?auth=true",
+      href: currentUser ? `/players/${currentUser.profile?.username || currentUser.email}` : null,
       icon: User,
     },
   ];
 
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#0b0f19]/95 backdrop-blur-lg border-t border-slate-800/80 px-2 py-1.5 flex items-center justify-around shadow-2xl">
+    <nav aria-label="Mobile navigation" className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-slate-800/80 bg-[#0b0f19]/95 px-1 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] shadow-2xl backdrop-blur-lg md:hidden">
       {navItems.map((item) => {
         const Icon = item.icon;
         const isActive = pathname === item.href;
-        return (
+        const className = `min-w-0 rounded-xl px-0.5 py-1.5 transition-all flex flex-col items-center justify-center ${
+          isActive
+            ? "text-cyan-400 bg-cyan-500/10 font-bold"
+            : "text-slate-400 hover:text-slate-200"
+        }`;
+        const content = <><Icon className={`h-5 w-5 shrink-0 ${isActive ? "scale-110 text-cyan-400" : ""}`} /><span className="mt-0.5 block w-full truncate text-center text-[10px] tracking-tight">{item.label}</span></>;
+        return item.href ? (
           <Link
             key={item.label}
             href={item.href}
-            className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all ${
-              isActive
-                ? "text-cyan-400 bg-cyan-500/10 font-bold"
-                : "text-slate-400 hover:text-slate-200"
-            }`}
+            className={className}
           >
-            <Icon className={`w-5 h-5 ${isActive ? "scale-110 text-cyan-400" : ""}`} />
-            <span className="text-[10px] mt-0.5 tracking-tight">{item.label}</span>
+            {content}
           </Link>
+        ) : (
+          <button key={item.label} type="button" onClick={onOpenAuth} className={className}>
+            {content}
+          </button>
         );
       })}
-    </div>
+    </nav>
   );
 }

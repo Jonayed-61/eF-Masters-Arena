@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireAuth } from "@/lib/auth";
 import { Role, TournamentStatus } from "@prisma/client";
 import { tournamentCreateSchema } from "@/lib/validators";
 import { logAudit } from "@/lib/audit";
+import { requireRole } from "@/lib/permissions";
+import { AppError, handleApiError } from "@/lib/api-response";
 
 export async function GET(req: Request) {
   try {
@@ -13,9 +14,12 @@ export async function GET(req: Request) {
     const feeType = searchParams.get("feeType"); // free / paid
     const query = searchParams.get("q");
 
-    const whereClause: Record<string, unknown> = {};
+    const whereClause: Record<string, unknown> = { status: { not: TournamentStatus.DRAFT } };
 
     if (statusFilter) {
+      if (!Object.values(TournamentStatus).includes(statusFilter as TournamentStatus) || statusFilter === TournamentStatus.DRAFT) {
+        throw new AppError("INVALID_STATUS", "Invalid public tournament status.", 400);
+      }
       whereClause.status = statusFilter as TournamentStatus;
     }
     if (formatFilter) {
@@ -60,14 +64,13 @@ export async function GET(req: Request) {
 
     return NextResponse.json({ success: true, tournaments: enrichedTournaments });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : "Failed to fetch tournaments";
-    return NextResponse.json({ error: errorMsg }, { status: 500 });
+    return handleApiError(err, "Tournaments could not be loaded.");
   }
 }
 
 export async function POST(req: Request) {
   try {
-    const user = await requireAuth([Role.SUPER_ADMIN, Role.TOURNAMENT_ADMIN]);
+    const user = await requireRole(Role.SUPER_ADMIN, Role.TOURNAMENT_ADMIN);
     const body = await req.json();
     const val = tournamentCreateSchema.parse(body);
 
@@ -90,6 +93,9 @@ export async function POST(req: Request) {
         entryFee: val.entryFee,
         currency: val.currency,
         totalSlots: val.totalSlots,
+        minimumParticipants: val.minimumParticipants,
+        groupCount: val.groupCount,
+        qualifiersPerGroup: val.qualifiersPerGroup,
         registrationStart: new Date(val.registrationStart),
         registrationEnd: new Date(val.registrationEnd),
         tournamentStart: new Date(val.tournamentStart),
@@ -100,6 +106,8 @@ export async function POST(req: Request) {
         thirdPlacePrize: val.thirdPlacePrize,
         format: val.format,
         organizer: val.organizer,
+        paymentInstructions: val.paymentInstructions || null,
+        contactInfo: val.contactInfo || null,
         createdById: user.id,
         rules: {
           create: {
@@ -110,6 +118,7 @@ export async function POST(req: Request) {
             groupExtraTime: val.groupExtraTime,
             knockoutExtraTime: val.knockoutExtraTime,
             knockoutPenalty: val.knockoutPenalty,
+            customRules: val.customRules || null,
           },
         },
       },
@@ -126,7 +135,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true, tournament });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : "Failed to create tournament";
-    return NextResponse.json({ error: errorMsg }, { status: 400 });
+    return handleApiError(err, "Tournament could not be created.");
   }
 }

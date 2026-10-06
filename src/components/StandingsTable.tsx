@@ -26,16 +26,16 @@ export interface StandingRow {
 
 export function StandingsTable({ groupName, standings }: { groupName: string; standings: StandingRow[] }) {
   return (
-    <div className="rounded-2xl bg-slate-900 border border-slate-800 shadow-xl overflow-hidden">
-      <div className="px-4 py-3 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-        <span className="font-extrabold text-sm text-cyan-400 flex items-center gap-1.5">
+    <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 shadow-xl">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 bg-slate-950 px-4 py-3">
+        <span className="flex min-w-0 items-center gap-1.5 break-words text-sm font-extrabold text-cyan-400">
           <Shield className="w-4 h-4 text-cyan-400" /> {groupName} Standings
         </span>
         <span className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Top 2 Qualify</span>
       </div>
 
       <div className="overflow-x-auto custom-scrollbar">
-        <table className="w-full text-left text-xs text-slate-300">
+        <table className="w-full min-w-[42rem] text-left text-xs text-slate-300">
           <thead className="bg-slate-950/80 text-[10px] uppercase font-bold text-slate-400 border-b border-slate-800">
             <tr>
               <th className="py-2.5 px-3">Pos</th>
@@ -64,14 +64,14 @@ export function StandingsTable({ groupName, standings }: { groupName: string; st
                     {st.position}
                     {isQualified && <ChevronUp className="w-3 h-3 text-emerald-400" />}
                   </td>
-                  <td className="py-2.5 px-3">
+                  <td className="max-w-48 py-2.5 px-3">
                     <Link
                       href={`/players/${st.user.profile?.username}`}
-                      className="font-bold text-white hover:text-cyan-400 transition-colors block leading-tight"
+                      className="block truncate font-bold leading-tight text-white transition-colors hover:text-cyan-400"
                     >
                       {st.user.profile?.username || "Unknown"}
                     </Link>
-                    <span className="text-[10px] text-slate-400 block">{st.user.profile?.teamName}</span>
+                    <span className="block truncate text-[10px] text-slate-400">{st.user.profile?.teamName}</span>
                   </td>
                   <td className="py-2.5 px-2 text-center text-slate-300 font-mono">{st.played}</td>
                   <td className="py-2.5 px-2 text-center text-emerald-400 font-mono font-bold">{st.won}</td>

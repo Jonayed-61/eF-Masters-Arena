@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { handleApiError } from "@/lib/api-response";
 
 export async function GET(req: Request, { params }: { params: Promise<{ username: string }> }) {
   try {
@@ -36,7 +37,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ username
     const totalMatches = profile.matchesPlayed || 1;
     const winRate = ((profile.matchesWon / totalMatches) * 100).toFixed(1);
 
-    const { whatsappNumber: _whatsappNumber, efootballId: _efootballId, ...publicProfile } = profile;
+    const publicProfile = { ...profile, whatsappNumber: undefined, efootballId: undefined };
 
     return NextResponse.json({
       success: true,
@@ -46,7 +47,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ username
       },
     });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : "Failed to fetch player profile";
-    return NextResponse.json({ error: errorMsg }, { status: 500 });
+    return handleApiError(err, "Player profile could not be loaded.");
   }
 }

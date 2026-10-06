@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireAuth } from "@/lib/auth";
+import { requireUser } from "@/lib/permissions";
 import { matchResultSubmissionSchema } from "@/lib/validators";
-import { MatchStatus } from "@prisma/client";
+import { MatchStatus, TournamentStatus } from "@prisma/client";
+import { AppError, handleApiError } from "@/lib/api-response";
+import { assertMatchCanAcceptSubmission } from "@/lib/tournament/lifecycle";
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const user = await requireAuth();
+    const user = await requireUser();
     const { id } = await params;
     const body = await req.json();
     const val = matchResultSubmissionSchema.parse(body);
@@ -21,13 +23,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (match.player1Id !== user.id && match.player2Id !== user.id) {
       return NextResponse.json({ error: "Forbidden: You are not a player in this match." }, { status: 403 });
     }
-    if (match.status !== MatchStatus.SCHEDULED && match.status !== MatchStatus.WAITING) {
-      return NextResponse.json({ error: "This match is not accepting a result submission." }, { status: 409 });
-    }
+    if (!new Set<TournamentStatus>([TournamentStatus.GROUP_STAGE, TournamentStatus.KNOCKOUT_STAGE, TournamentStatus.ONGOING]).has(match.tournament.status)) throw new AppError("INVALID_TOURNAMENT_PHASE", "This tournament is not accepting match results.", 409);
+    assertMatchCanAcceptSubmission(match.status);
 
     const submission = await db.$transaction(async (tx) => {
-      const existingSubmission = await tx.matchSubmission.findFirst({ where: { matchId: match.id } });
-      if (existingSubmission) throw new Error("A result has already been submitted for this match.");
+      const existingSubmission = await tx.matchSubmission.findUnique({ where: { matchId_submitterId: { matchId: match.id, submitterId: user.id } } });
+      if (existingSubmission) throw new AppError("DUPLICATE_SUBMISSION", "You already submitted a result for this match.", 409);
       const created = await tx.matchSubmission.create({
         data: {
           matchId: match.id,
@@ -38,7 +39,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           notes: val.notes || null,
         },
       });
-      await tx.match.update({ where: { id: match.id }, data: { status: MatchStatus.RESULT_SUBMITTED } });
+      const submissionCount = await tx.matchSubmission.count({ where: { matchId: match.id } });
+      await tx.match.update({ where: { id: match.id }, data: { status: submissionCount >= 2 ? MatchStatus.UNDER_REVIEW : MatchStatus.RESULT_SUBMITTED } });
+      await tx.notification.create({ data: { userId: match.tournament.createdById, title: "Match result submitted", message: `A result for ${match.tournament.name} requires review.`, link: "/dashboard" } });
       return created;
     });
 
@@ -48,7 +51,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       submission,
     });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : "Failed to submit result";
-    return NextResponse.json({ error: errorMsg }, { status: 400 });
+    return handleApiError(err, "Match result could not be submitted.");
   }
 }

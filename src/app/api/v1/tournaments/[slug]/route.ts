@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { canManageTournament, getSession, requireAuth } from "@/lib/auth";
-import { Role, TournamentStatus } from "@prisma/client";
+import { getSession } from "@/lib/auth";
+import { TournamentStatus } from "@prisma/client";
 import { logAudit } from "@/lib/audit";
+import { requireTournamentOwnerOrSuperAdmin } from "@/lib/permissions";
+import { AppError, handleApiError } from "@/lib/api-response";
+import { assertTournamentTransition } from "@/lib/tournament/lifecycle";
+import { tournamentUpdateSchema } from "@/lib/validators";
 
 const publicProfileFields = {
   fullName: true, username: true, profilePicture: true, efootballIgn: true, teamName: true,
@@ -84,6 +88,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ slug: st
     if (!tournament) {
       return NextResponse.json({ error: "Tournament not found" }, { status: 404 });
     }
+    if (tournament.status === TournamentStatus.DRAFT && (!session || session.userId !== tournament.createdById)) {
+      return NextResponse.json({ error: "Tournament not found" }, { status: 404 });
+    }
 
     const confirmedCount = tournament.registrations.length;
     const availableSlots = Math.max(0, tournament.totalSlots - confirmedCount);
@@ -112,30 +119,26 @@ export async function GET(req: Request, { params }: { params: Promise<{ slug: st
       userRegistration,
     });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : "Failed to fetch tournament detail";
-    return NextResponse.json({ error: errorMsg }, { status: 500 });
+    return handleApiError(err, "Tournament details could not be loaded.");
   }
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ slug: string }> }) {
   try {
-    const user = await requireAuth([Role.SUPER_ADMIN, Role.TOURNAMENT_ADMIN]);
     const { slug } = await params;
-    const body = await req.json();
+    const body = tournamentUpdateSchema.parse(await req.json());
 
     const existing = await db.tournament.findUnique({ where: { slug } });
     if (!existing) {
       return NextResponse.json({ error: "Tournament not found" }, { status: 404 });
     }
-    if (!(await canManageTournament(user, existing.id))) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-    if (body.status === TournamentStatus.COMPLETED) {
-      return NextResponse.json({ error: "Use the tournament completion action after the final is confirmed." }, { status: 409 });
-    }
-    if (body.status && !Object.values(TournamentStatus).includes(body.status)) {
-      return NextResponse.json({ error: "Invalid tournament status." }, { status: 400 });
-    }
+    const user = await requireTournamentOwnerOrSuperAdmin(existing.id);
+    if (body.status) assertTournamentTransition(existing.status, body.status as TournamentStatus);
+    const approvedCount = await db.registration.count({ where: { tournamentId: existing.id, status: "APPROVED" } });
+    if (body.totalSlots !== undefined && body.totalSlots < approvedCount) throw new AppError("CAPACITY_BELOW_PARTICIPANTS", "Capacity cannot be lower than the approved participant count.", 409);
+    const progressionExists = await db.match.count({ where: { tournamentId: existing.id } });
+    if (progressionExists > 0 && (body.totalSlots !== undefined || body.entryFee !== undefined)) throw new AppError("TOURNAMENT_ALREADY_STARTED", "Capacity and entry fee cannot change after fixtures exist.", 409);
+    if ((body.entryFee ?? existing.entryFee) > 0 && body.paymentInstructions === null) throw new AppError("PAYMENT_INSTRUCTIONS_REQUIRED", "Paid tournaments require payment instructions.", 400);
 
     const updated = await db.tournament.update({
       where: { id: existing.id },
@@ -146,6 +149,9 @@ export async function PUT(req: Request, { params }: { params: Promise<{ slug: st
         ...(body.totalSlots && { totalSlots: body.totalSlots }),
         ...(body.entryFee !== undefined && { entryFee: body.entryFee }),
         ...(body.prizePool !== undefined && { prizePool: body.prizePool }),
+        ...(body.paymentInstructions !== undefined && { paymentInstructions: body.paymentInstructions }),
+        ...(body.contactInfo !== undefined && { contactInfo: body.contactInfo }),
+        ...(body.status && existing.status === TournamentStatus.DRAFT && body.status !== TournamentStatus.DRAFT && { publishedAt: new Date() }),
       },
     });
 
@@ -160,7 +166,6 @@ export async function PUT(req: Request, { params }: { params: Promise<{ slug: st
 
     return NextResponse.json({ success: true, tournament: updated });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : "Failed to update tournament";
-    return NextResponse.json({ error: errorMsg }, { status: 400 });
+    return handleApiError(err, "Tournament could not be updated.");
   }
 }

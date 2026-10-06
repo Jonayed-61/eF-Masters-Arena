@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { hashPassword, signToken } from "@/lib/auth";
 import { signUpSchema } from "@/lib/validators";
+import { handleApiError } from "@/lib/api-response";
 
 export async function POST(req: Request) {
   try {
@@ -32,43 +33,21 @@ export async function POST(req: Request) {
     }
 
     const passwordHash = await hashPassword(validated.password);
-    const userReferralCode = validated.username.toUpperCase() + Math.floor(100 + Math.random() * 900);
-
-    const user = await db.user.create({
-      data: {
-        email: validated.email,
-        passwordHash,
-        referralCode: userReferralCode,
-        profile: {
-          create: {
-            fullName: validated.fullName,
-            username: validated.username,
-            efootballId: validated.efootballId,
-            efootballIgn: validated.efootballIgn,
-            teamName: validated.teamName,
-            whatsappNumber: validated.whatsappNumber,
-            country: validated.country || "Bangladesh",
-            bio: validated.bio || null,
-          },
+    const user = await db.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          email: validated.email,
+          passwordHash,
+          profile: { create: { fullName: validated.fullName, username: validated.username, efootballId: validated.efootballId, efootballIgn: validated.efootballIgn, teamName: validated.teamName, whatsappNumber: validated.whatsappNumber, country: validated.country || "Bangladesh", bio: validated.bio || null } },
         },
-      },
-      include: { profile: true },
-    });
-
-    // Handle referral code if provided
-    if (validated.referralCode) {
-      const referrer = await db.user.findFirst({
-        where: { referralCode: validated.referralCode },
+        include: { profile: true },
       });
-      if (referrer && referrer.id !== user.id) {
-        await db.referral.create({
-          data: {
-            referrerId: referrer.id,
-            referredId: user.id,
-          },
-        });
+      if (validated.referralCode) {
+        const referrer = await tx.user.findFirst({ where: { referralCode: validated.referralCode }, select: { id: true } });
+        if (referrer) await tx.referral.create({ data: { referrerId: referrer.id, referredId: created.id } });
       }
-    }
+      return created;
+    });
 
     const token = await signToken({
       userId: user.id,
@@ -93,11 +72,11 @@ export async function POST(req: Request) {
       secure: process.env.NODE_ENV === "production",
       path: "/",
       maxAge: 7 * 24 * 60 * 60,
+      expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     });
 
     return res;
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : "Registration failed";
-    return NextResponse.json({ error: errorMsg }, { status: 400 });
+    return handleApiError(err, "Account creation failed.");
   }
 }

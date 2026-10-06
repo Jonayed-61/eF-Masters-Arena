@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { handleApiError } from "@/lib/api-response";
 
 export async function GET(req: Request) {
   try {
@@ -41,13 +42,12 @@ export async function GET(req: Request) {
 
     const total = await db.profile.count({ where });
     const rankedProfiles = profiles.map((p, idx) => {
-      const { efootballId: _efootballId, whatsappNumber: _whatsappNumber, ...publicProfile } = p;
+      const publicProfile = { ...p, efootballId: undefined, whatsappNumber: undefined };
       return { rank: (page - 1) * limit + idx + 1, ...publicProfile };
     });
 
     return NextResponse.json({ success: true, rankings: rankedProfiles, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : "Failed to fetch rankings";
-    return NextResponse.json({ error: errorMsg }, { status: 500 });
+    return handleApiError(err, "Rankings could not be loaded.");
   }
 }

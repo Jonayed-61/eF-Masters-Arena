@@ -1,20 +1,18 @@
 import { NextResponse } from "next/server";
-import { MatchStatus, Role } from "@prisma/client";
-import { canManageTournament, requireAuth } from "@/lib/auth";
+import { MatchStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { finalizeTournamentEngine } from "@/lib/tournament-engine";
 import { logAudit } from "@/lib/audit";
+import { requireTournamentOwnerOrSuperAdmin } from "@/lib/permissions";
+import { handleApiError } from "@/lib/api-response";
 
 export async function POST(_req: Request, { params }: { params: Promise<{ slug: string }> }) {
   try {
-    const admin = await requireAuth([Role.SUPER_ADMIN, Role.TOURNAMENT_ADMIN]);
     const { slug } = await params;
     const tournament = await db.tournament.findUnique({ where: { slug } });
 
     if (!tournament) return NextResponse.json({ error: "Tournament not found" }, { status: 404 });
-    if (!(await canManageTournament(admin, tournament.id))) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    const admin = await requireTournamentOwnerOrSuperAdmin(tournament.id);
 
     const finalMatch = await db.match.findFirst({
       where: { tournamentId: tournament.id, roundName: "Final" },
@@ -46,7 +44,6 @@ export async function POST(_req: Request, { params }: { params: Promise<{ slug: 
 
     return NextResponse.json({ success: true, message: "Tournament completed and Hall of Fame updated.", hallOfFame });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : "Failed to complete tournament";
-    return NextResponse.json({ error: errorMsg }, { status: 400 });
+    return handleApiError(err, "Tournament completion failed.");
   }
 }

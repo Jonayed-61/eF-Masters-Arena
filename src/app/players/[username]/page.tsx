@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { notFound } from "next/navigation";
-import { Shield, Trophy, Award, Flame, Star, Crown, MessageSquare, History, Globe } from "lucide-react";
+import { Shield, Award, History } from "lucide-react";
 import Link from "next/link";
 
 export const revalidate = 0;
@@ -35,27 +35,27 @@ export default async function PlayerProfilePage({
   const winRate = ((profile.matchesWon / totalMatches) * 100).toFixed(1);
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+    <div className="page-container">
       {/* Player Header Card */}
-      <div className="p-8 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl relative overflow-hidden space-y-6">
+      <div className="relative min-w-0 space-y-6 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 p-5 shadow-2xl sm:rounded-3xl sm:p-8">
         <div className="flex flex-col sm:flex-row items-center gap-6">
           <div className="w-24 h-24 rounded-3xl bg-gradient-to-tr from-cyan-500 to-emerald-400 flex items-center justify-center text-4xl font-extrabold text-black shadow-xl shadow-cyan-500/20 shrink-0">
             {profile.username[0].toUpperCase()}
           </div>
 
-          <div className="space-y-2 text-center sm:text-left flex-1">
+          <div className="min-w-0 flex-1 space-y-2 text-center sm:text-left">
             <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3">
-              <h1 className="text-3xl font-black text-white">{profile.fullName}</h1>
+              <h1 className="break-words text-2xl font-black text-white sm:text-3xl">{profile.fullName}</h1>
               <span className="px-3 py-1 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold font-mono">
                 🏆 {profile.rankingPoints} Points
               </span>
             </div>
 
-            <p className="text-xs text-slate-400">
+            <p className="break-words text-xs text-slate-400">
               @{profile.username} • {profile.country} • IGN: <strong className="text-slate-200">{profile.efootballIgn}</strong> • Team: <strong className="text-cyan-400">{profile.teamName}</strong>
             </p>
 
-            <p className="text-xs text-slate-300 max-w-xl leading-relaxed">{profile.bio || "No bio provided."}</p>
+            <p className="max-w-xl break-words text-xs leading-relaxed text-slate-300">{profile.bio || "No bio provided."}</p>
 
           </div>
         </div>
@@ -106,13 +106,13 @@ export default async function PlayerProfilePage({
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
             {profile.user.achievements.map((item) => (
-              <div key={item.id} className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 flex items-center gap-3">
+              <div key={item.id} className="flex min-w-0 items-center gap-3 rounded-2xl border border-slate-800 bg-slate-950 p-3.5">
                 <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center justify-center text-xl shrink-0">
                   ⭐
                 </div>
-                <div>
-                  <h4 className="font-extrabold text-xs text-white">{item.achievement.title}</h4>
-                  <p className="text-[10px] text-slate-400 leading-tight">{item.achievement.description}</p>
+                <div className="min-w-0">
+                  <h4 className="break-words text-xs font-extrabold text-white">{item.achievement.title}</h4>
+                  <p className="break-words text-[10px] leading-tight text-slate-400">{item.achievement.description}</p>
                 </div>
               </div>
             ))}
@@ -127,15 +127,16 @@ export default async function PlayerProfilePage({
         </h3>
 
         <div className="space-y-3">
+          {profile.user.registrations.length === 0 && <p className="rounded-2xl border border-slate-800 bg-slate-950 p-6 text-center text-xs text-slate-400">No tournament history yet.</p>}
           {profile.user.registrations.map((reg) => (
-            <div key={reg.id} className="p-4 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-between">
-              <div>
+            <div key={reg.id} className="flex min-w-0 flex-col gap-3 rounded-2xl border border-slate-800 bg-slate-950 p-4 min-[390px]:flex-row min-[390px]:items-center min-[390px]:justify-between">
+              <div className="min-w-0">
                 <span className="text-[10px] text-cyan-400 font-bold uppercase">{reg.tournament.season?.name || "Cup"}</span>
-                <Link href={`/tournaments/${reg.tournament.slug}`} className="font-extrabold text-sm text-white hover:text-cyan-400 block">
+                <Link href={`/tournaments/${reg.tournament.slug}`} className="block break-words text-sm font-extrabold text-white hover:text-cyan-400">
                   {reg.tournament.name}
                 </Link>
               </div>
-              <span className="px-3 py-1 rounded-xl bg-slate-900 border border-slate-800 text-xs font-bold text-slate-300">
+              <span className="self-start whitespace-nowrap rounded-xl border border-slate-800 bg-slate-900 px-3 py-1 text-xs font-bold text-slate-300">
                 {reg.status}
               </span>
             </div>

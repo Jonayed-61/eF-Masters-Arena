@@ -1,10 +1,9 @@
 import { db } from "./db";
-import { Match, MatchStatus, PaymentStatus, RegistrationStatus, TournamentStatus } from "@prisma/client";
+import { Match, MatchStatus, Prisma, RegistrationStatus, TournamentStatus } from "@prisma/client";
+import { AppError } from "./api-response";
+import { calculateAvailableSlots, calculateStandings, createRoundRobinPairs } from "./tournament/calculations";
 
-export function calculateAvailableSlots(totalSlots: number, confirmedCount: number) {
-  const availableSlots = Math.max(0, totalSlots - confirmedCount);
-  return { availableSlots, isFull: availableSlots === 0 };
-}
+export { calculateAvailableSlots } from "./tournament/calculations";
 
 /**
  * Calculates remaining slots for a tournament.
@@ -40,66 +39,46 @@ export async function getTournamentSlotStatus(tournamentId: string) {
  * Generates group assignments for confirmed tournament participants.
  */
 export async function generateGroupsEngine(tournamentId: string, groupCount: number = 4) {
-  const participants = await db.tournamentParticipant.findMany({
-    where: { tournamentId },
-    orderBy: { joinedAt: "asc" },
-  });
-
-  if (participants.length === 0) {
-    throw new Error("No confirmed participants to generate groups");
+  if (!Number.isInteger(groupCount) || groupCount < 1 || groupCount > 8) throw new AppError("INVALID_GROUP_COUNT", "Group count must be between 1 and 8.", 400);
+  const tournament = await db.tournament.findUnique({ where: { id: tournamentId }, include: { groups: { orderBy: { order: "asc" } } } });
+  if (!tournament) throw new AppError("TOURNAMENT_NOT_FOUND", "Tournament not found.", 404);
+  if (tournament.groups.length > 0) return tournament.groups;
+  if (!new Set<TournamentStatus>([TournamentStatus.REGISTRATION_CLOSED, TournamentStatus.GROUP_STAGE, TournamentStatus.ONGOING]).has(tournament.status)) {
+    throw new AppError("INVALID_TOURNAMENT_PHASE", "Close registration before generating groups.", 409);
   }
+  const approved = await db.registration.findMany({ where: { tournamentId, status: RegistrationStatus.APPROVED }, orderBy: { createdAt: "asc" }, select: { userId: true } });
+  if (approved.length < tournament.minimumParticipants) throw new AppError("NOT_ENOUGH_PARTICIPANTS", `At least ${tournament.minimumParticipants} approved participants are required.`, 409);
+  if (groupCount > approved.length) throw new AppError("TOO_MANY_GROUPS", "Group count cannot exceed the participant count.", 409);
 
-  // Delete existing groups and standings
-  await db.standing.deleteMany({ where: { tournamentId } });
-  await db.groupMember.deleteMany({ where: { group: { tournamentId } } });
-  await db.group.deleteMany({ where: { tournamentId } });
-
-  const groupLetters = ["A", "B", "C", "D", "E", "F", "G", "H"];
-  const createdGroups = [];
-
-  for (let i = 0; i < groupCount; i++) {
-    const groupName = `Group ${groupLetters[i] || i + 1}`;
-    const group = await db.group.create({
-      data: {
-        tournamentId,
-        name: groupName,
-        order: i + 1,
-      },
-    });
-    createdGroups.push(group);
-  }
-
-  // Distribute participants across groups evenly (Snake draft / Round-robin distribution)
-  for (let idx = 0; idx < participants.length; idx++) {
-    const participant = participants[idx];
-    const groupIndex = idx % groupCount;
-    const targetGroup = createdGroups[groupIndex];
-
-    await db.groupMember.create({
-      data: {
-        groupId: targetGroup.id,
-        participantId: participant.id,
-      },
-    });
-
-    // Create initial 0-point standing entry
-    await db.standing.create({
-      data: {
-        tournamentId,
-        groupId: targetGroup.id,
-        userId: participant.userId,
-        position: 1,
-      },
-    });
-  }
-
-  return createdGroups;
+  return db.$transaction(async (tx) => {
+    const participants = [];
+    for (const registration of approved) {
+      participants.push(await tx.tournamentParticipant.upsert({ where: { tournamentId_userId: { tournamentId, userId: registration.userId } }, update: {}, create: { tournamentId, userId: registration.userId } }));
+    }
+    const groupLetters = ["A", "B", "C", "D", "E", "F", "G", "H"];
+    const createdGroups = [];
+    for (let index = 0; index < groupCount; index += 1) {
+      createdGroups.push(await tx.group.create({ data: { tournamentId, name: `Group ${groupLetters[index]}`, order: index + 1 } }));
+    }
+    for (let index = 0; index < participants.length; index += 1) {
+      const participant = participants[index];
+      const targetGroup = createdGroups[index % groupCount];
+      await tx.groupMember.create({ data: { groupId: targetGroup.id, participantId: participant.id } });
+      await tx.standing.create({ data: { tournamentId, groupId: targetGroup.id, userId: participant.userId, position: 1 } });
+      await tx.notification.create({ data: { userId: participant.userId, title: "Group assigned", message: `You were assigned to ${targetGroup.name} in ${tournament.name}.`, link: `/tournaments/${tournament.slug}` } });
+    }
+    await tx.tournament.update({ where: { id: tournamentId }, data: { status: TournamentStatus.GROUP_STAGE, groupCount } });
+    return createdGroups;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
 /**
  * Generates Round-Robin match fixtures for each group in a tournament.
  */
 export async function generateGroupFixturesEngine(tournamentId: string) {
+  const tournament = await db.tournament.findUnique({ where: { id: tournamentId } });
+  if (!tournament) throw new AppError("TOURNAMENT_NOT_FOUND", "Tournament not found.", 404);
+  if (!new Set<TournamentStatus>([TournamentStatus.GROUP_STAGE, TournamentStatus.ONGOING]).has(tournament.status)) throw new AppError("INVALID_TOURNAMENT_PHASE", "Group fixtures can only be generated during the group stage.", 409);
   const groups = await db.group.findMany({
     where: { tournamentId },
     include: {
@@ -109,45 +88,20 @@ export async function generateGroupFixturesEngine(tournamentId: string) {
     },
   });
 
-  if (groups.length === 0) throw new Error("No groups found. Please generate groups first.");
-
-  // Clear previous group matches
-  await db.match.deleteMany({
-    where: {
-      tournamentId,
-      groupId: { not: null },
-    },
-  });
-
-  const generatedMatches: Match[] = [];
-
-  for (const group of groups) {
-    const userIds = group.members.map((m) => m.participant.userId);
-
-    // Generate round-robin pairings
-    for (let i = 0; i < userIds.length; i++) {
-      for (let j = i + 1; j < userIds.length; j++) {
-        const p1 = userIds[i];
-        const p2 = userIds[j];
-
-        const createdMatch: Match = await db.match.create({
-          data: {
-            tournamentId,
-            groupId: group.id,
-            roundName: group.name,
-            roundNumber: 1,
-            player1Id: p1,
-            player2Id: p2,
-            status: MatchStatus.SCHEDULED,
-            scheduledTime: new Date(Date.now() + (generatedMatches.length + 1) * 3600 * 1000),
-          },
-        });
-        generatedMatches.push(createdMatch);
+  if (groups.length === 0) throw new AppError("GROUPS_NOT_FOUND", "Generate groups before fixtures.", 409);
+  const existing = await db.match.findMany({ where: { tournamentId, groupId: { not: null } }, orderBy: [{ groupId: "asc" }, { matchNumber: "asc" }] });
+  if (existing.length > 0) return existing;
+  return db.$transaction(async (tx) => {
+    const generatedMatches: Match[] = [];
+    for (const group of groups) {
+      const pairs = createRoundRobinPairs(group.members.map((member) => member.participant.userId));
+      for (let index = 0; index < pairs.length; index += 1) {
+        const [player1Id, player2Id] = pairs[index];
+        generatedMatches.push(await tx.match.create({ data: { tournamentId, groupId: group.id, roundName: group.name, roundNumber: 1, matchNumber: index + 1, player1Id, player2Id, status: MatchStatus.SCHEDULED } }));
       }
     }
-  }
-
-  return generatedMatches;
+    return generatedMatches;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
 /**
@@ -173,131 +127,48 @@ export async function updateGroupStandings(groupId: string) {
     },
   });
 
-  const statsMap: Record<
-    string,
-    {
-      played: number;
-      won: number;
-      drawn: number;
-      lost: number;
-      goalsFor: number;
-      goalsAgainst: number;
-      points: number;
-    }
-  > = {};
-
-  // Initialize stats
-  for (const member of group.members) {
-    statsMap[member.participant.userId] = {
-      played: 0,
-      won: 0,
-      drawn: 0,
-      lost: 0,
-      goalsFor: 0,
-      goalsAgainst: 0,
-      points: 0,
-    };
-  }
-
-  // Calculate stats from confirmed matches
-  for (const match of confirmedMatches) {
-    if (!match.player1Id || !match.player2Id) continue;
-    const p1Score = match.player1Score ?? 0;
-    const p2Score = match.player2Score ?? 0;
-
-    const s1 = statsMap[match.player1Id];
-    const s2 = statsMap[match.player2Id];
-
-    if (s1) {
-      s1.played += 1;
-      s1.goalsFor += p1Score;
-      s1.goalsAgainst += p2Score;
-    }
-
-    if (s2) {
-      s2.played += 1;
-      s2.goalsFor += p2Score;
-      s2.goalsAgainst += p1Score;
-    }
-
-    if (p1Score > p2Score) {
-      if (s1) { s1.won += 1; s1.points += 3; }
-      if (s2) { s2.lost += 1; }
-    } else if (p2Score > p1Score) {
-      if (s2) { s2.won += 1; s2.points += 3; }
-      if (s1) { s1.lost += 1; }
-    } else {
-      if (s1) { s1.drawn += 1; s1.points += 1; }
-      if (s2) { s2.drawn += 1; s2.points += 1; }
-    }
-  }
-
-  // Sort players by: Points -> Goal Difference -> Goals For
-  const sortedPlayers = Object.keys(statsMap).sort((a, b) => {
-    const sA = statsMap[a];
-    const sB = statsMap[b];
-
-    if (sB.points !== sA.points) return sB.points - sA.points;
-
-    const gdA = sA.goalsFor - sA.goalsAgainst;
-    const gdB = sB.goalsFor - sB.goalsAgainst;
-    if (gdB !== gdA) return gdB - gdA;
-
-    return sB.goalsFor - sA.goalsFor;
-  });
-
-  // Upsert standings table
-  for (let idx = 0; idx < sortedPlayers.length; idx++) {
-    const userId = sortedPlayers[idx];
-    const st = statsMap[userId];
-    const goalDiff = st.goalsFor - st.goalsAgainst;
-
-    await db.standing.upsert({
+  const standings = calculateStandings(
+    group.members.map((member) => member.participant.userId),
+    confirmedMatches.flatMap((match) => match.player1Id && match.player2Id && match.player1Score !== null && match.player2Score !== null ? [{ player1Id: match.player1Id, player2Id: match.player2Id, player1Score: match.player1Score, player2Score: match.player2Score }] : []),
+  );
+  await db.$transaction(standings.map((standing) => db.standing.upsert({
       where: {
-        groupId_userId: {
-          groupId,
-          userId,
-        },
+        groupId_userId: { groupId, userId: standing.userId },
       },
       update: {
-        position: idx + 1,
-        played: st.played,
-        won: st.won,
-        drawn: st.drawn,
-        lost: st.lost,
-        goalsFor: st.goalsFor,
-        goalsAgainst: st.goalsAgainst,
-        goalDiff,
-        points: st.points,
+        position: standing.position, played: standing.played, won: standing.won, drawn: standing.drawn, lost: standing.lost,
+        goalsFor: standing.goalsFor, goalsAgainst: standing.goalsAgainst, goalDiff: standing.goalDiff, points: standing.points,
       },
       create: {
-        tournamentId: group.tournamentId,
-        groupId,
-        userId,
-        position: idx + 1,
-        played: st.played,
-        won: st.won,
-        drawn: st.drawn,
-        lost: st.lost,
-        goalsFor: st.goalsFor,
-        goalsAgainst: st.goalsAgainst,
-        goalDiff,
-        points: st.points,
+        tournamentId: group.tournamentId, groupId, userId: standing.userId, position: standing.position,
+        played: standing.played, won: standing.won, drawn: standing.drawn, lost: standing.lost,
+        goalsFor: standing.goalsFor, goalsAgainst: standing.goalsAgainst, goalDiff: standing.goalDiff, points: standing.points,
       },
-    });
-  }
+    })));
+  return standings;
 }
 
 /**
  * Generates Knockout Bracket (Quarter Final -> Semi Final -> Final)
  */
 export async function generateKnockoutBracketEngine(tournamentId: string, topPerGroup: number = 2) {
+  const tournament = await db.tournament.findUnique({ where: { id: tournamentId } });
+  if (!tournament) throw new AppError("TOURNAMENT_NOT_FOUND", "Tournament not found.", 404);
+  if (!new Set<TournamentStatus>([TournamentStatus.GROUP_STAGE, TournamentStatus.ONGOING, TournamentStatus.KNOCKOUT_STAGE]).has(tournament.status)) {
+    throw new AppError("INVALID_TOURNAMENT_PHASE", "The knockout bracket can only be generated after the group stage.", 409);
+  }
+  const existingNodes = await db.bracketNode.findMany({ where: { tournamentId }, include: { match: true }, orderBy: [{ round: "asc" }, { position: "asc" }] });
+  if (existingNodes.length > 0) return { existing: true, nodes: existingNodes };
+  if (!Number.isInteger(topPerGroup) || topPerGroup < 1 || topPerGroup > 4) throw new AppError("INVALID_QUALIFIER_COUNT", "Qualifiers per group must be between 1 and 4.", 400);
   const groups = await db.group.findMany({
     where: { tournamentId },
     orderBy: { order: "asc" },
   });
 
-  if (groups.length === 0) throw new Error("No groups exist for bracket creation");
+  if (groups.length === 0) throw new AppError("GROUPS_NOT_FOUND", "No groups exist for bracket creation.", 409);
+  const groupMatchCount = await db.match.count({ where: { tournamentId, groupId: { not: null } } });
+  const unresolvedGroupMatches = await db.match.count({ where: { tournamentId, groupId: { not: null }, status: { not: MatchStatus.CONFIRMED } } });
+  if (groupMatchCount === 0 || unresolvedGroupMatches > 0) throw new AppError("GROUP_STAGE_INCOMPLETE", "Every group match must be verified before generating the knockout bracket.", 409);
 
   const qualifiedUsers: { userId: string; groupName: string; pos: number }[] = [];
 
@@ -312,19 +183,13 @@ export async function generateKnockoutBracketEngine(tournamentId: string, topPer
     });
   }
 
-  if (qualifiedUsers.length < 2) throw new Error("At least 2 qualified players are required for knockout bracket");
+  const uniqueQualifierIds = new Set(qualifiedUsers.map((qualifier) => qualifier.userId));
+  if (qualifiedUsers.length !== 8 || uniqueQualifierIds.size !== 8) throw new AppError("UNSUPPORTED_BRACKET_SIZE", "This tournament engine currently requires exactly eight unique knockout qualifiers.", 409);
 
-  // Clear previous brackets and knockout matches
-  await db.bracketNode.deleteMany({ where: { tournamentId } });
-  await db.match.deleteMany({
-    where: {
-      tournamentId,
-      groupId: null,
-    },
-  });
+  return db.$transaction(async (tx) => {
 
   // Create Final node first
-  const finalNode = await db.bracketNode.create({
+  const finalNode = await tx.bracketNode.create({
     data: {
       tournamentId,
       round: 3,
@@ -333,7 +198,7 @@ export async function generateKnockoutBracketEngine(tournamentId: string, topPer
     },
   });
 
-  const finalMatch = await db.match.create({
+  const finalMatch = await tx.match.create({
     data: {
       tournamentId,
       roundName: "Final",
@@ -343,13 +208,13 @@ export async function generateKnockoutBracketEngine(tournamentId: string, topPer
     },
   });
 
-  await db.bracketNode.update({
+  await tx.bracketNode.update({
     where: { id: finalNode.id },
     data: { match: { connect: { id: finalMatch.id } } },
   });
 
   // Semi Finals
-  const sf1Node = await db.bracketNode.create({
+  const sf1Node = await tx.bracketNode.create({
     data: {
       tournamentId,
       round: 2,
@@ -359,7 +224,7 @@ export async function generateKnockoutBracketEngine(tournamentId: string, topPer
     },
   });
 
-  const sf1Match = await db.match.create({
+  const sf1Match = await tx.match.create({
     data: {
       tournamentId,
       roundName: "Semi Final",
@@ -370,12 +235,12 @@ export async function generateKnockoutBracketEngine(tournamentId: string, topPer
     },
   });
 
-  await db.bracketNode.update({
+  await tx.bracketNode.update({
     where: { id: sf1Node.id },
     data: { match: { connect: { id: sf1Match.id } } },
   });
 
-  const sf2Node = await db.bracketNode.create({
+  const sf2Node = await tx.bracketNode.create({
     data: {
       tournamentId,
       round: 2,
@@ -385,7 +250,7 @@ export async function generateKnockoutBracketEngine(tournamentId: string, topPer
     },
   });
 
-  const sf2Match = await db.match.create({
+  const sf2Match = await tx.match.create({
     data: {
       tournamentId,
       roundName: "Semi Final",
@@ -396,7 +261,7 @@ export async function generateKnockoutBracketEngine(tournamentId: string, topPer
     },
   });
 
-  await db.bracketNode.update({
+  await tx.bracketNode.update({
     where: { id: sf2Node.id },
     data: { match: { connect: { id: sf2Match.id } } },
   });
@@ -409,7 +274,7 @@ export async function generateKnockoutBracketEngine(tournamentId: string, topPer
     const p1 = qualifiedUsers[i * 2]?.userId || null;
     const p2 = qualifiedUsers[i * 2 + 1]?.userId || null;
 
-    const qfNode = await db.bracketNode.create({
+    const qfNode = await tx.bracketNode.create({
       data: {
         tournamentId,
         round: 1,
@@ -421,7 +286,7 @@ export async function generateKnockoutBracketEngine(tournamentId: string, topPer
       },
     });
 
-    const qfMatch = await db.match.create({
+    const qfMatch = await tx.match.create({
       data: {
         tournamentId,
         roundName: "Quarter Final",
@@ -434,7 +299,7 @@ export async function generateKnockoutBracketEngine(tournamentId: string, topPer
       },
     });
 
-    await db.bracketNode.update({
+    await tx.bracketNode.update({
       where: { id: qfNode.id },
       data: { match: { connect: { id: qfMatch.id } } },
     });
@@ -442,62 +307,34 @@ export async function generateKnockoutBracketEngine(tournamentId: string, topPer
     qfNodes.push(qfNode);
   }
 
-  return { finalNode, sf1Node, sf2Node, qfNodes };
+  await tx.tournament.update({ where: { id: tournamentId }, data: { status: TournamentStatus.KNOCKOUT_STAGE, qualifiersPerGroup: topPerGroup } });
+  return { existing: false, finalNode, sf1Node, sf2Node, qfNodes };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
 /**
  * Advances winner of a knockout match to the next bracket round automatically.
  */
 export async function advanceKnockoutWinnerEngine(matchId: string) {
-  const match = await db.match.findUnique({
-    where: { id: matchId },
-    include: { bracketNode: true },
-  });
-
-  if (!match || !match.winnerId || !match.bracketNode || !match.bracketNode.nextMatchId) {
-    return;
-  }
-
-  const currentBracket = match.bracketNode;
-  const nextMatchId = currentBracket.nextMatchId;
-  if (!nextMatchId) return;
-  const nextBracket = await db.bracketNode.findUnique({
-    where: { id: nextMatchId },
-  });
-
-  if (!nextBracket) return;
-
-  // Determine whether this winner sits as player1 or player2 in next match
-  const isPlayer1Slot = !nextBracket.player1Id;
-
-  const updateBracketData = isPlayer1Slot
-    ? { player1Id: match.winnerId }
-    : { player2Id: match.winnerId };
-
-  await db.bracketNode.update({
-    where: { id: nextBracket.id },
-    data: updateBracketData,
-  });
-
-  const nextMatch = await db.match.findUnique({ where: { bracketNodeId: nextBracket.id } });
-  if (nextMatch) {
-    const updateMatchData = isPlayer1Slot
-      ? { player1Id: match.winnerId }
-      : { player2Id: match.winnerId };
-
-    const updatedNextMatch = await db.match.update({
-      where: { id: nextMatch.id },
-      data: updateMatchData,
-    });
-
-    // If both players are now populated in next match, update status to SCHEDULED
-    if (updatedNextMatch.player1Id && updatedNextMatch.player2Id) {
-      await db.match.update({
-        where: { id: updatedNextMatch.id },
-        data: { status: MatchStatus.SCHEDULED },
-      });
+  await db.$transaction(async (tx) => {
+    const match = await tx.match.findUnique({ where: { id: matchId }, include: { bracketNode: true } });
+    if (!match || match.status !== MatchStatus.CONFIRMED || !match.winnerId || !match.bracketNode) return;
+    await tx.bracketNode.update({ where: { id: match.bracketNode.id }, data: { winnerId: match.winnerId } });
+    if (!match.bracketNode.nextMatchId) return;
+    const nextBracket = await tx.bracketNode.findUnique({ where: { id: match.bracketNode.nextMatchId } });
+    if (!nextBracket) return;
+    if (nextBracket.player1Id === match.winnerId || nextBracket.player2Id === match.winnerId) return;
+    if (nextBracket.player1Id && nextBracket.player2Id) throw new AppError("BRACKET_SLOT_CONFLICT", "The next bracket match is already full.", 409);
+    const usePlayerOne = !nextBracket.player1Id;
+    const bracketData = usePlayerOne ? { player1Id: match.winnerId } : { player2Id: match.winnerId };
+    await tx.bracketNode.update({ where: { id: nextBracket.id }, data: bracketData });
+    const nextMatch = await tx.match.findUnique({ where: { bracketNodeId: nextBracket.id } });
+    if (!nextMatch) return;
+    const updated = await tx.match.update({ where: { id: nextMatch.id }, data: bracketData });
+    if (updated.player1Id && updated.player2Id && updated.status === MatchStatus.WAITING) {
+      await tx.match.update({ where: { id: updated.id }, data: { status: MatchStatus.SCHEDULED } });
     }
-  }
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
 /**
@@ -505,72 +342,37 @@ export async function advanceKnockoutWinnerEngine(matchId: string) {
  * populates Hall of Fame, and updates player statistics.
  */
 export async function finalizeTournamentEngine(tournamentId: string, championId: string, runnerUpId: string, thirdPlaceId?: string) {
+  if (championId === runnerUpId || championId === thirdPlaceId || runnerUpId === thirdPlaceId) throw new AppError("INVALID_PODIUM", "Podium players must be unique.", 409);
   const existingHallOfFame = await db.hallOfFame.findUnique({ where: { tournamentId } });
   if (existingHallOfFame) return existingHallOfFame;
-
-  const tournament = await db.tournament.update({
-    where: { id: tournamentId },
-    data: { status: TournamentStatus.COMPLETED },
-  });
-
-  // Award Ranking Points
   const pointDistribution = {
     champion: 100,
     runnerUp: 70,
     thirdPlace: 50,
-    quarterFinal: 30,
-    groupStage: 10,
   };
-
-  // Champion updates
-  await db.profile.update({
-    where: { userId: championId },
-    data: {
-      championships: { increment: 1 },
-      rankingPoints: { increment: pointDistribution.champion },
-    },
-  });
-
-  // Runner-Up updates
-  await db.profile.update({
-    where: { userId: runnerUpId },
-    data: {
-      runnerUps: { increment: 1 },
-      rankingPoints: { increment: pointDistribution.runnerUp },
-    },
-  });
-
-  if (thirdPlaceId) {
-    await db.profile.update({
-      where: { userId: thirdPlaceId },
-      data: {
-        semiFinals: { increment: 1 },
-        rankingPoints: { increment: pointDistribution.thirdPlace },
-      },
-    });
-  }
-
-  // Record Hall of Fame
-  await db.hallOfFame.upsert({
-    where: { tournamentId },
-    update: {
-      championId,
-      runnerUpId,
-      thirdPlaceId,
-      prizePool: tournament.prizePool,
-    },
-    create: {
-      tournamentId,
-      championId,
-      runnerUpId,
-      thirdPlaceId,
-      prizePool: tournament.prizePool,
-    },
-  });
-
-  // Auto-Unlock Achievements
+  const hallOfFame = await db.$transaction(async (tx) => {
+    const currentHall = await tx.hallOfFame.findUnique({ where: { tournamentId } });
+    if (currentHall) return currentHall;
+    const tournament = await tx.tournament.findUniqueOrThrow({ where: { id: tournamentId } });
+    if (!new Set<TournamentStatus>([TournamentStatus.KNOCKOUT_STAGE, TournamentStatus.ONGOING]).has(tournament.status)) throw new AppError("INVALID_TOURNAMENT_PHASE", "Only a tournament in its knockout stage can be completed.", 409);
+    const podiumIds = [championId, runnerUpId, ...(thirdPlaceId ? [thirdPlaceId] : [])];
+    const approvedPodiumCount = await tx.registration.count({ where: { tournamentId, userId: { in: podiumIds }, status: RegistrationStatus.APPROVED } });
+    if (approvedPodiumCount !== podiumIds.length) throw new AppError("INVALID_PODIUM", "Every podium player must be an approved tournament participant.", 409);
+    const created = await tx.hallOfFame.create({ data: { tournamentId, championId, runnerUpId, thirdPlaceId, prizePool: tournament.prizePool } });
+    await tx.profile.update({ where: { userId: championId }, data: { championships: { increment: 1 }, rankingPoints: { increment: pointDistribution.champion } } });
+    await tx.profile.update({ where: { userId: runnerUpId }, data: { runnerUps: { increment: 1 }, rankingPoints: { increment: pointDistribution.runnerUp } } });
+    if (thirdPlaceId) await tx.profile.update({ where: { userId: thirdPlaceId }, data: { semiFinals: { increment: 1 }, rankingPoints: { increment: pointDistribution.thirdPlace } } });
+    await tx.tournament.update({ where: { id: tournamentId }, data: { status: TournamentStatus.COMPLETED } });
+    await tx.notification.createMany({ data: [
+      { userId: championId, title: "Tournament champion", message: `You won ${tournament.name}.`, link: `/tournaments/${tournament.slug}` },
+      { userId: runnerUpId, title: "Tournament completed", message: `You finished runner-up in ${tournament.name}.`, link: `/tournaments/${tournament.slug}` },
+    ] });
+    return created;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   await checkAndUnlockAchievements(championId);
   await checkAndUnlockAchievements(runnerUpId);
+  if (thirdPlaceId) await checkAndUnlockAchievements(thirdPlaceId);
+  return hallOfFame;
 }
 
 /**

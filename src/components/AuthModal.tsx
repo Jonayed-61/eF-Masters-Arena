@@ -1,7 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { X, Trophy, LogIn, UserPlus, AlertCircle } from "lucide-react";
+import { X, AlertCircle } from "lucide-react";
+
+function responseError(data: { error?: string | { message?: string } }) {
+  return typeof data.error === "string" ? data.error : data.error?.message || "Authentication failed";
+}
 
 export function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const [tab, setTab] = useState<"login" | "signup">("login");
@@ -49,10 +53,10 @@ export function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || "Authentication failed");
+        throw new Error(responseError(data));
       }
 
-      window.location.reload();
+      window.location.assign("/dashboard");
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : "Authentication failed";
       setError(errorMsg);
@@ -62,10 +66,10 @@ export function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden relative">
+    <div className="dialog-backdrop">
+      <div className="dialog-panel max-w-md">
         {/* Header Tabs */}
-        <div className="px-6 py-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-800 bg-slate-950 px-4 py-3 sm:px-6 sm:py-4">
           <div className="flex gap-2">
             <button
               onClick={() => { setTab("login"); setError(""); }}
@@ -84,13 +88,13 @@ export function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
               Create Account
             </button>
           </div>
-          <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-white">
+          <button onClick={onClose} aria-label="Close authentication dialog" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-900 hover:text-white">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-3.5 max-h-[80vh] overflow-y-auto custom-scrollbar">
+        <form onSubmit={handleSubmit} className="custom-scrollbar min-h-0 space-y-3.5 overflow-y-auto p-4 sm:p-6">
           {error && (
             <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
@@ -151,7 +155,7 @@ export function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
 
           {tab === "signup" && (
             <>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 gap-3 min-[390px]:grid-cols-2">
                 <div>
                   <label className="text-xs font-semibold text-slate-300">eFootball User ID</label>
                   <input
@@ -176,7 +180,7 @@ export function AuthModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 gap-3 min-[390px]:grid-cols-2">
                 <div>
                   <label className="text-xs font-semibold text-slate-300">Team Name</label>
                   <input

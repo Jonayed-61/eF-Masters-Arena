@@ -4,6 +4,9 @@ import bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
 
 async function main() {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("Development seed data cannot be loaded in production.");
+  }
   console.log("Starting eF Masters Arena seed...");
 
   // Clear existing database records cleanly

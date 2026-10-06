@@ -1,7 +1,8 @@
 import { db } from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { getSession } from "@/lib/auth";
-import { Flag, AlertCircle, CheckCircle, Clock } from "lucide-react";
+import { Flag, CheckCircle } from "lucide-react";
+import { DisputeAdminClient } from "../admin/disputes/DisputeAdminClient";
 
 export const revalidate = 0;
 
@@ -20,8 +21,8 @@ export default async function DisputesPage() {
   if (session && (session.role === "SUPER_ADMIN" || session.role === "TOURNAMENT_ADMIN" || session.role === "MODERATOR")) {
     disputes = await db.dispute.findMany({
       where: session.role === "TOURNAMENT_ADMIN"
-        ? { match: { tournament: { createdById: session.userId } } }
-        : undefined,
+        ? { status: { in: ["OPEN", "UNDER_REVIEW"] }, match: { tournament: { createdById: session.userId } } }
+        : { status: { in: ["OPEN", "UNDER_REVIEW"] } },
       include: {
         match: { include: { tournament: true } },
         reporter: { include: { profile: true } },
@@ -47,11 +48,15 @@ export default async function DisputesPage() {
     disputes = [];
   }
 
+  if (session && (session.role === "SUPER_ADMIN" || session.role === "TOURNAMENT_ADMIN" || session.role === "MODERATOR")) {
+    return <DisputeAdminClient disputes={disputes} userRole={session.role} />;
+  }
+
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-      <div className="p-8 rounded-3xl bg-slate-900 border border-slate-800 space-y-2">
-        <h1 className="text-3xl font-black text-white flex items-center gap-2">
-          <Flag className="w-8 h-8 text-rose-400" /> Fair Play & Dispute Resolution Portal
+    <div className="page-container">
+      <div className="page-hero space-y-2">
+        <h1 className="flex items-start gap-2 break-words text-2xl font-black text-white sm:items-center sm:text-3xl">
+          <Flag className="mt-0.5 h-7 w-7 shrink-0 text-rose-400 sm:h-8 sm:w-8" /> Fair Play & Dispute Resolution Portal
         </h1>
         <p className="text-xs sm:text-sm text-slate-400">
           Track and review filed match disputes, cheating reports, and administrator decisions.
@@ -72,7 +77,7 @@ export default async function DisputesPage() {
         <div className="space-y-4">
           {disputes.map((d) => (
             <div key={d.id} className="p-6 rounded-3xl bg-slate-900 border border-slate-800 space-y-3">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex min-w-0 flex-wrap items-start justify-between gap-2 border-b border-slate-800 pb-3">
                 <span className="text-xs font-bold text-cyan-400">{d.match.tournament.name} • {d.match.roundName}</span>
                 <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
                   d.status === "RESOLVED" ? "bg-emerald-500/20 text-emerald-400" : "bg-amber-500/20 text-amber-400"
@@ -94,13 +99,13 @@ export default async function DisputesPage() {
 
               <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 text-xs space-y-1">
                 <span className="font-bold text-rose-400">Reason: {d.reason}</span>
-                <p className="text-slate-300">{d.description}</p>
+                <p className="break-words text-slate-300">{d.description}</p>
               </div>
 
               {d.adminDecision && (
                 <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-xs space-y-1">
                   <span className="font-bold text-emerald-300">⚖️ Admin Decision: {d.adminDecision}</span>
-                  {d.adminNotes && <p className="text-slate-300">{d.adminNotes}</p>}
+                  {d.adminNotes && <p className="break-words text-slate-300">{d.adminNotes}</p>}
                 </div>
               )}
             </div>

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Trophy, Users, Calendar, ArrowRight, ShieldCheck, Zap } from "lucide-react";
+import Image from "next/image";
+import { Users, Calendar, ArrowRight, ShieldCheck, Zap } from "lucide-react";
 
 export interface TournamentCardProps {
   id: string;
@@ -44,7 +45,7 @@ export function TournamentCard({ tournament }: { tournament: TournamentCardProps
         </span>
       );
     }
-    if (status === "ONGOING") {
+    if (status === "ONGOING" || status === "GROUP_STAGE" || status === "KNOCKOUT_STAGE") {
       return (
         <span className="px-2.5 py-1 rounded-full bg-cyan-500/20 text-cyan-400 border border-cyan-500/40 text-xs font-bold flex items-center gap-1">
           <Zap className="w-3 h-3 text-cyan-400" /> Matches Live
@@ -65,26 +66,24 @@ export function TournamentCard({ tournament }: { tournament: TournamentCardProps
     );
   };
 
-  const percentageFilled = Math.min(100, Math.round((tournament.confirmedSlots / tournament.totalSlots) * 100));
+  const percentageFilled = tournament.totalSlots > 0
+    ? Math.min(100, Math.round((tournament.confirmedSlots / tournament.totalSlots) * 100))
+    : 0;
 
   return (
-    <div className="group rounded-2xl bg-slate-900/80 border border-slate-800 hover:border-cyan-500/40 transition-all duration-300 overflow-hidden shadow-xl flex flex-col justify-between hover:shadow-cyan-500/10">
+    <article className="group flex min-w-0 flex-col justify-between overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-xl transition-all duration-300 hover:border-cyan-500/40 hover:shadow-cyan-500/10">
       {/* Card Header & Banner */}
       <div className="relative h-44 w-full overflow-hidden bg-slate-950">
-        <img
-          src={tournament.banner || "https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=1200"}
-          alt={tournament.name}
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 opacity-80"
-        />
+        {tournament.banner ? <Image src={tournament.banner} alt={tournament.name} fill sizes="(min-width: 1024px) 33vw, (min-width: 768px) 50vw, 100vw" className="object-cover opacity-80 transition-transform duration-500 group-hover:scale-105" /> : <div className="h-full w-full bg-gradient-to-br from-cyan-950 via-slate-950 to-emerald-950" aria-hidden="true" />}
         <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/40 to-transparent"></div>
-        <div className="absolute top-3 left-3 right-3 flex items-center justify-between">
-          <span className="px-2.5 py-1 rounded-lg bg-black/60 backdrop-blur-md text-[11px] font-semibold text-slate-300 border border-white/10">
-            {tournament.season?.name || "Official Cup"}
+        <div className="absolute left-3 right-3 top-3 flex min-w-0 items-start justify-between gap-2">
+          <span className="min-w-0 max-w-[55%] truncate rounded-lg border border-white/10 bg-black/60 px-2.5 py-1 text-[11px] font-semibold text-slate-300 backdrop-blur-md">
+            {tournament.season?.name || "Independent tournament"}
           </span>
-          {getStatusBadge(tournament.status, tournament.isFull)}
+          <span className="shrink-0">{getStatusBadge(tournament.status, tournament.isFull)}</span>
         </div>
         <div className="absolute bottom-3 left-3 right-3">
-          <h3 className="text-lg font-extrabold text-white group-hover:text-cyan-400 transition-colors line-clamp-1">
+          <h3 className="line-clamp-2 break-words text-lg font-extrabold leading-tight text-white transition-colors group-hover:text-cyan-400">
             {tournament.name}
           </h3>
           <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
@@ -152,6 +151,6 @@ export function TournamentCard({ tournament }: { tournament: TournamentCardProps
           <ArrowRight className="w-4 h-4" />
         </Link>
       </div>
-    </div>
+    </article>
   );
 }

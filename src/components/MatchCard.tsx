@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { MatchStatus } from "@prisma/client";
-import { Calendar, Trophy, Send, Flag, CheckCircle, AlertTriangle, Image as ImageIcon, Loader2 } from "lucide-react";
+import { Calendar, Send, Flag, AlertTriangle, Image as ImageIcon, Loader2 } from "lucide-react";
 import Link from "next/link";
+import Image from "next/image";
 
 export interface MatchData {
   id: string;
@@ -15,8 +16,12 @@ export interface MatchData {
   winnerId?: string | null;
   scheduledTime?: string | Date | null;
   status: MatchStatus;
-  player1?: { id: string; profile: { username: string; efootballIgn: string } } | null;
-  player2?: { id: string; profile: { username: string; efootballIgn: string } } | null;
+  player1?: { id: string; profile: { username: string; efootballIgn: string } | null } | null;
+  player2?: { id: string; profile: { username: string; efootballIgn: string } | null } | null;
+}
+
+function responseError(data: { error?: string | { message?: string } }, fallback: string) {
+  return typeof data.error === "string" ? data.error : data.error?.message || fallback;
 }
 
 export function MatchCard({
@@ -32,12 +37,12 @@ export function MatchCard({
   const [showDisputeModal, setShowDisputeModal] = useState(false);
   const [playerScore, setPlayerScore] = useState(0);
   const [opponentScore, setOpponentScore] = useState(0);
-  const [screenshot, setScreenshot] = useState("");
   const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
   const [screenshotPreview, setScreenshotPreview] = useState("");
   const [notes, setNotes] = useState("");
   const [disputeReason, setDisputeReason] = useState("");
   const [disputeDesc, setDisputeDesc] = useState("");
+  const [disputeEvidence, setDisputeEvidence] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [msg, setMsg] = useState("");
@@ -59,7 +64,7 @@ export function MatchCard({
       uploadBody.append("type", "match");
       const uploadRes = await fetch("/api/v1/uploads/payment-screenshot", { method: "POST", body: uploadBody });
       const uploadData = await uploadRes.json();
-      if (!uploadRes.ok) throw new Error(uploadData.error || "Screenshot upload failed");
+      if (!uploadRes.ok) throw new Error(responseError(uploadData, "Screenshot upload failed"));
       setUploading(false);
 
       const res = await fetch(`/api/v1/matches/${match.id}/submit`, {
@@ -73,7 +78,7 @@ export function MatchCard({
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error(responseError(data, "Result submission failed"));
       setMsg("✅ Result submitted successfully!");
       if (onRefresh) onRefresh();
       setTimeout(() => setShowModal(false), 1500);
@@ -106,6 +111,16 @@ export function MatchCard({
     setSubmitting(true);
     try {
       const reportedPlayerId = isP1 ? match.player2Id : match.player1Id;
+      let evidenceUrl: string | undefined;
+      if (disputeEvidence) {
+        const uploadBody = new FormData();
+        uploadBody.append("file", disputeEvidence);
+        uploadBody.append("type", "dispute");
+        const uploadResponse = await fetch("/api/v1/uploads/payment-screenshot", { method: "POST", body: uploadBody });
+        const uploadData = await uploadResponse.json();
+        if (!uploadResponse.ok) throw new Error(responseError(uploadData, "Evidence upload failed"));
+        evidenceUrl = uploadData.url;
+      }
       const res = await fetch(`/api/v1/disputes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -114,10 +129,11 @@ export function MatchCard({
           reportedPlayerId,
           reason: disputeReason,
           description: disputeDesc,
+          evidenceUrl,
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error(responseError(data, "Dispute submission failed"));
       setMsg("✅ Dispute reported to admins!");
       if (onRefresh) onRefresh();
       setTimeout(() => setShowDisputeModal(false), 1500);
@@ -130,11 +146,11 @@ export function MatchCard({
   };
 
   return (
-    <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-all shadow-xl space-y-3">
+    <article className="min-w-0 space-y-3 rounded-2xl border border-slate-800 bg-slate-900 p-4 shadow-xl transition-all hover:border-slate-700">
       {/* Header */}
-      <div className="flex items-center justify-between text-xs border-b border-slate-800 pb-2">
-        <span className="font-bold text-cyan-400 uppercase tracking-wider">{match.roundName}</span>
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-semibold flex items-center gap-1">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2 text-xs">
+        <span className="min-w-0 break-words font-bold uppercase tracking-wider text-cyan-400">{match.roundName}</span>
+        <span className="flex shrink-0 items-center gap-1 rounded-full bg-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-300">
           <Calendar className="w-3 h-3 text-cyan-400" />
           {match.scheduledTime ? new Date(match.scheduledTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "Scheduled"}
         </span>
@@ -143,17 +159,17 @@ export function MatchCard({
       {/* Players Matchup Grid */}
       <div className="grid grid-cols-7 items-center gap-2 text-center py-2">
         {/* Player 1 */}
-        <div className="col-span-3 flex flex-col items-center">
+        <div className="col-span-3 flex min-w-0 flex-col items-center">
           <Link href={`/players/${p1Name}`} className="font-bold text-sm text-white hover:text-cyan-400 truncate max-w-full">
             {p1Name}
           </Link>
-          <span className="text-[10px] text-slate-400">{match.player1?.profile?.efootballIgn}</span>
+          <span className="block max-w-full truncate text-[10px] text-slate-400">{match.player1?.profile?.efootballIgn}</span>
         </div>
 
         {/* Score / VS */}
         <div className="col-span-1 flex flex-col items-center justify-center">
           {match.status === "CONFIRMED" || match.status === "RESULT_SUBMITTED" ? (
-            <span className="px-2.5 py-1 rounded-xl bg-slate-950 font-mono font-extrabold text-cyan-400 text-sm border border-slate-800">
+            <span className="whitespace-nowrap rounded-xl border border-slate-800 bg-slate-950 px-2 py-1 font-mono text-sm font-extrabold text-cyan-400 sm:px-2.5">
               {match.player1Score ?? 0} - {match.player2Score ?? 0}
             </span>
           ) : (
@@ -162,29 +178,30 @@ export function MatchCard({
         </div>
 
         {/* Player 2 */}
-        <div className="col-span-3 flex flex-col items-center">
+        <div className="col-span-3 flex min-w-0 flex-col items-center">
           <Link href={`/players/${p2Name}`} className="font-bold text-sm text-white hover:text-cyan-400 truncate max-w-full">
             {p2Name}
           </Link>
-          <span className="text-[10px] text-slate-400">{match.player2?.profile?.efootballIgn}</span>
+          <span className="block max-w-full truncate text-[10px] text-slate-400">{match.player2?.profile?.efootballIgn}</span>
         </div>
       </div>
 
       {/* Footer & Actions */}
-      <div className="flex items-center justify-between border-t border-slate-800 pt-2 text-xs">
-        <span className="text-[10px] text-slate-400 font-medium">Status: <strong className="text-slate-200">{match.status}</strong></span>
+      <div className="flex flex-col gap-2 border-t border-slate-800 pt-2 text-xs min-[390px]:flex-row min-[390px]:items-center min-[390px]:justify-between">
+        <span className="break-words text-[10px] font-medium text-slate-400">Status: <strong className="text-slate-200">{match.status.replaceAll("_", " ")}</strong></span>
 
         {isPlayerInMatch && match.status !== "CONFIRMED" && (
-          <div className="flex gap-2">
+          <div className="flex min-w-0 gap-2 self-stretch min-[390px]:self-auto">
             <button
               onClick={() => setShowModal(true)}
-              className="px-3 py-1.5 rounded-xl bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 font-bold text-xs hover:bg-cyan-500/30 flex items-center gap-1"
+              className="flex min-h-10 flex-1 items-center justify-center gap-1 rounded-xl border border-cyan-500/40 bg-cyan-500/20 px-3 py-2 text-xs font-bold text-cyan-300 hover:bg-cyan-500/30"
             >
               <Send className="w-3 h-3" /> Submit Result
             </button>
             <button
               onClick={() => setShowDisputeModal(true)}
-              className="p-1.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 hover:bg-rose-500/20"
+              aria-label="Report match dispute"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20"
               title="Report Dispute"
             >
               <Flag className="w-3.5 h-3.5" />
@@ -195,12 +212,12 @@ export function MatchCard({
 
       {/* Result Submission Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4">
+        <div className="dialog-backdrop">
+          <div className="dialog-panel max-w-md overflow-y-auto p-4 sm:p-6">
             <h4 className="font-extrabold text-white text-base">Submit Match Result</h4>
             {msg && <p className="text-xs font-semibold">{msg}</p>}
             <form onSubmit={handleSubmitResult} className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 min-[390px]:grid-cols-2">
                 <div>
                   <label className="text-xs text-slate-300">Your Score ({isP1 ? p1Name : p2Name})</label>
                   <input
@@ -229,7 +246,7 @@ export function MatchCard({
               <div>
                 <label className="text-xs text-slate-300">Match Result Screenshot</label>
                 <label className="mt-1 flex min-h-24 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-cyan-500/40 bg-slate-950 px-3 py-3 text-center hover:border-cyan-400">
-                  {screenshotPreview ? <img src={screenshotPreview} alt="Match screenshot preview" className="max-h-28 rounded-lg object-contain" /> : <><ImageIcon className="h-6 w-6 text-cyan-400" /><span className="text-xs text-slate-300">Choose screenshot image</span><span className="text-[10px] text-slate-500">JPG, PNG or WEBP up to 5MB</span></>}
+                  {screenshotPreview ? <Image src={screenshotPreview} alt="Match screenshot preview" width={448} height={224} unoptimized className="max-h-28 w-auto rounded-lg object-contain" /> : <><ImageIcon className="h-6 w-6 text-cyan-400" /><span className="text-xs text-slate-300">Choose screenshot image</span><span className="text-[10px] text-slate-500">JPG, PNG or WEBP up to 5MB</span></>}
                   <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(e) => handleScreenshotChange(e.target.files?.[0])} />
                 </label>
               </div>
@@ -243,7 +260,7 @@ export function MatchCard({
                   className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white"
                 />
               </div>
-              <div className="flex gap-2 pt-2">
+              <div className="flex flex-col-reverse gap-2 pt-2 min-[390px]:flex-row">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
@@ -266,8 +283,8 @@ export function MatchCard({
 
       {/* Dispute Modal */}
       {showDisputeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4">
+        <div className="dialog-backdrop">
+          <div className="dialog-panel max-w-md overflow-y-auto p-4 sm:p-6">
             <h4 className="font-extrabold text-rose-400 text-base flex items-center gap-2">
               <AlertTriangle className="w-5 h-5" /> Report Match Dispute
             </h4>
@@ -298,7 +315,8 @@ export function MatchCard({
                   className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white"
                 ></textarea>
               </div>
-              <div className="flex gap-2 pt-2">
+              <div><label className="text-xs text-slate-300">Evidence image (optional)</label><input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setDisputeEvidence(event.target.files?.[0] || null)} className="mt-1 block w-full text-xs text-slate-400 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-800 file:px-3 file:py-2 file:text-xs file:font-bold file:text-cyan-300" /></div>
+              <div className="flex flex-col-reverse gap-2 pt-2 min-[390px]:flex-row">
                 <button
                   type="button"
                   onClick={() => setShowDisputeModal(false)}
@@ -318,6 +336,6 @@ export function MatchCard({
           </div>
         </div>
       )}
-    </div>
+    </article>
   );
 }

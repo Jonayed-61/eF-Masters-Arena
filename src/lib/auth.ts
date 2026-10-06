@@ -3,12 +3,9 @@ import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import { Role } from "@prisma/client";
 import { db } from "./db";
+import { getServerEnv } from "./env";
 
-const configuredSecret = process.env.JWT_SECRET;
-if (process.env.NODE_ENV === "production" && !configuredSecret) {
-  throw new Error("JWT_SECRET must be configured in production.");
-}
-const JWT_SECRET = new TextEncoder().encode(configuredSecret || "local-development-only-secret-change-before-deploy");
+const JWT_SECRET = new TextEncoder().encode(getServerEnv().JWT_SECRET);
 
 export interface SessionPayload {
   userId: string;

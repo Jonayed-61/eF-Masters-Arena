@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { handleApiError } from "@/lib/api-response";
 
 export async function GET() {
   try {
@@ -15,7 +16,6 @@ export async function GET() {
 
     return NextResponse.json({ success: true, hallOfFame });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : "Failed to fetch Hall of Fame";
-    return NextResponse.json({ error: errorMsg }, { status: 500 });
+    return handleApiError(err, "Hall of Fame could not be loaded.");
   }
 }

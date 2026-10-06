@@ -1,18 +1,19 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireAuth } from "@/lib/auth";
 import { Role } from "@prisma/client";
+import { handleApiError } from "@/lib/api-response";
+import { requireAdmin } from "@/lib/permissions";
 
 export async function GET() {
   try {
-    const user = await requireAuth([Role.SUPER_ADMIN, Role.TOURNAMENT_ADMIN, Role.MODERATOR]);
-    const tournamentScope = user.role === Role.SUPER_ADMIN ? {} : { createdById: user.id };
-    const registrationScope = user.role === Role.SUPER_ADMIN ? {} : { registration: { tournament: tournamentScope } };
+    const user = await requireAdmin();
+    const tournamentScope = user.role === Role.TOURNAMENT_ADMIN ? { createdById: user.id } : {};
+    const registrationScope = user.role === Role.MODERATOR ? { id: "__no_payment_access__" } : user.role === Role.SUPER_ADMIN ? {} : { registration: { tournament: tournamentScope } };
     const matchScope = user.role === Role.SUPER_ADMIN ? {} : { tournament: tournamentScope };
 
     const totalPlayers = await db.user.count({ where: { role: Role.PLAYER } });
     const totalTournaments = await db.tournament.count({ where: tournamentScope });
-    const activeTournaments = await db.tournament.count({ where: { ...tournamentScope, status: "ONGOING" } });
+    const activeTournaments = await db.tournament.count({ where: { ...tournamentScope, status: { in: ["ONGOING", "GROUP_STAGE", "KNOCKOUT_STAGE"] } } });
     const upcomingTournaments = await db.tournament.count({ where: { ...tournamentScope, status: "UPCOMING" } });
     const pendingPayments = await db.payment.count({ where: { ...registrationScope, status: "UNDER_REVIEW" } });
     const pendingMatches = await db.match.count({ where: { ...matchScope, status: "RESULT_SUBMITTED" } });
@@ -21,6 +22,8 @@ export async function GET() {
         ? { status: "OPEN" }
         : { status: "OPEN", match: { tournament: tournamentScope } },
     });
+    const approvedParticipants = await db.registration.count({ where: { tournament: tournamentScope, status: "APPROVED" } });
+    const completedTournaments = await db.tournament.count({ where: { ...tournamentScope, status: "COMPLETED" } });
 
     // Aggregate total entry revenue
     const approvedPayments = await db.payment.findMany({
@@ -56,13 +59,14 @@ export async function GET() {
         pendingPayments,
         pendingMatches,
         openDisputes,
+        approvedParticipants,
+        completedTournaments,
         totalRevenue,
         totalPrizeMoney,
       },
       recentAuditLogs,
     });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : "Failed to fetch analytics";
-    return NextResponse.json({ error: errorMsg }, { status: 400 });
+    return handleApiError(err, "Analytics could not be loaded.");
   }
 }

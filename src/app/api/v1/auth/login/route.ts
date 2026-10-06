@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { verifyPassword, signToken } from "@/lib/auth";
 import { loginSchema } from "@/lib/validators";
+import { handleApiError } from "@/lib/api-response";
 
 export async function POST(req: Request) {
   try {
@@ -17,14 +18,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
     }
 
-    if (user.isBanned) {
-      return NextResponse.json({ error: "Your account has been suspended/banned. Contact administrator." }, { status: 403 });
-    }
-
     const isValid = await verifyPassword(validated.password, user.passwordHash);
     if (!isValid) {
       return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
     }
+    if (user.isBanned) return NextResponse.json({ error: "This account is not permitted to sign in." }, { status: 403 });
 
     const token = await signToken({
       userId: user.id,
@@ -49,11 +47,11 @@ export async function POST(req: Request) {
       secure: process.env.NODE_ENV === "production",
       path: "/",
       maxAge: 7 * 24 * 60 * 60,
+      expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     });
 
     return res;
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : "Login failed";
-    return NextResponse.json({ error: errorMsg }, { status: 400 });
+    return handleApiError(err, "Login failed.");
   }
 }

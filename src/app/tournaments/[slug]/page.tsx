@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { TournamentDetailClient } from "./TournamentDetailClient";
 import { notFound } from "next/navigation";
+import { Role, TournamentStatus } from "@prisma/client";
 
 const publicProfileFields = {
   fullName: true,
@@ -99,6 +100,7 @@ export default async function TournamentDetailPage({
   });
 
   if (!tournament) notFound();
+  if (tournament.status === TournamentStatus.DRAFT && (!session || (session.userId !== tournament.createdById && session.role !== Role.SUPER_ADMIN))) notFound();
 
   const confirmedCount = tournament.registrations.length;
   const availableSlots = Math.max(0, tournament.totalSlots - confirmedCount);
@@ -128,6 +130,7 @@ export default async function TournamentDetailPage({
       tournament={enrichedTournament}
       userRegistration={userRegistration}
       currentUserId={session?.userId || null}
+      canManage={Boolean(session && (session.role === Role.SUPER_ADMIN || (session.role === Role.TOURNAMENT_ADMIN && session.userId === tournament.createdById)))}
     />
   );
 }

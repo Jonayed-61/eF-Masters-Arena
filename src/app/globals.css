@@ -2,8 +2,61 @@
 @source "../";
 
 @layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    min-width: 0;
+    scroll-padding-top: 5rem;
+  }
+
   body {
-    @apply bg-[#0b0f19] text-slate-100 font-sans antialiased selection:bg-cyan-500 selection:text-black;
+    @apply min-w-0 bg-[#0b0f19] text-slate-100 font-sans antialiased selection:bg-cyan-500 selection:text-black;
+    min-height: 100dvh;
+  }
+
+  img,
+  svg,
+  video,
+  canvas {
+    max-width: 100%;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    min-width: 0;
+  }
+
+  button,
+  a {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-cyan-400;
+  }
+}
+
+@layer components {
+  .page-container {
+    @apply mx-auto w-full max-w-7xl min-w-0 space-y-6 px-4 py-6 sm:space-y-8 sm:px-6 sm:py-8 lg:px-8;
+  }
+
+  .page-hero {
+    @apply min-w-0 rounded-2xl border border-slate-800 bg-slate-900 p-5 sm:rounded-3xl sm:p-8;
+  }
+
+  .dialog-backdrop {
+    @apply fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-2 backdrop-blur-sm sm:p-4;
+  }
+
+  .dialog-panel {
+    @apply relative flex max-h-[calc(100dvh-1rem)] w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl sm:max-h-[calc(100dvh-2rem)] sm:rounded-3xl;
   }
 }
 

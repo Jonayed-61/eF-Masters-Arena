@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Trophy, Shield, User, Bell, LogOut, Menu, X, Sparkles, LayoutDashboard, Flag } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { Trophy, Shield, Bell, LogOut, Menu, X, Sparkles, LayoutDashboard, Flag } from "lucide-react";
 
 export interface UserSession {
   id: string;
@@ -27,6 +28,7 @@ interface UserNotification {
 }
 
 export function Navbar({ currentUser, onOpenAuth }: { currentUser: UserSession | null; onOpenAuth: () => void }) {
+  const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -46,6 +48,11 @@ export function Navbar({ currentUser, onOpenAuth }: { currentUser: UserSession |
     }
   }, [currentUser]);
 
+  useEffect(() => {
+    setMobileMenuOpen(false);
+    setNotificationsOpen(false);
+  }, [pathname]);
+
   const handleLogout = async () => {
     await fetch("/api/v1/auth/logout", { method: "POST" });
     window.location.reload();
@@ -59,14 +66,14 @@ export function Navbar({ currentUser, onOpenAuth }: { currentUser: UserSession |
 
   return (
     <header className="sticky top-0 z-40 bg-[#0b0f19]/90 backdrop-blur-md border-b border-slate-800/80">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div className="mx-auto flex h-16 w-full max-w-7xl min-w-0 items-center justify-between gap-2 px-4 sm:px-6 lg:px-8">
         {/* Brand Logo */}
-        <Link href="/" className="flex items-center gap-2.5 group">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 to-emerald-400 flex items-center justify-center shadow-lg shadow-cyan-500/20 group-hover:scale-105 transition-transform">
+        <Link href="/" className="group flex min-w-0 items-center gap-2.5" aria-label="eF Masters Arena home">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-cyan-600 to-emerald-400 shadow-lg shadow-cyan-500/20 transition-transform group-hover:scale-105">
             <Trophy className="w-5 h-5 text-black stroke-[2.5]" />
           </div>
-          <div className="flex flex-col">
-            <span className="font-extrabold text-lg tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-100 to-slate-400">
+          <div className="hidden min-w-0 flex-col min-[390px]:flex lg:hidden xl:flex">
+            <span className="truncate bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-base font-extrabold tracking-tight text-transparent sm:text-lg">
               eF Masters <span className="text-cyan-400">Arena</span>
             </span>
             <span className="text-[10px] text-cyan-400 font-semibold tracking-widest uppercase -mt-1">
@@ -76,7 +83,7 @@ export function Navbar({ currentUser, onOpenAuth }: { currentUser: UserSession |
         </Link>
 
         {/* Desktop Navigation */}
-        <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-300">
+        <nav className="hidden items-center gap-4 text-sm font-medium text-slate-300 lg:flex xl:gap-6">
           <Link href="/tournaments" className="hover:text-cyan-400 transition-colors flex items-center gap-1.5">
             <Trophy className="w-4 h-4 text-cyan-400" /> Tournaments
           </Link>
@@ -94,22 +101,24 @@ export function Navbar({ currentUser, onOpenAuth }: { currentUser: UserSession |
               <LayoutDashboard className="w-4 h-4 text-emerald-400" /> Dashboard
             </Link>
           )}
-          {currentUser && (currentUser.role === "SUPER_ADMIN" || currentUser.role === "TOURNAMENT_ADMIN" || currentUser.role === "MODERATOR") && (
-            <Link href="/admin" className="px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 font-semibold text-xs flex items-center gap-1 hover:bg-amber-500/20 transition-all">
-              <LayoutDashboard className="w-3.5 h-3.5" /> Admin Control
+          {currentUser?.role === "SUPER_ADMIN" && (
+            <Link href="/dashboard/users" className="flex items-center gap-1.5 transition-colors hover:text-amber-400">
+              <Shield className="h-4 w-4 text-amber-400" /> Users
             </Link>
           )}
         </nav>
 
         {/* User Auth / Profile Section */}
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-3">
           {currentUser ? (
-            <div className="flex items-center gap-3">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
               {/* Notification Bell */}
               <div className="relative">
                 <button
                   onClick={() => setNotificationsOpen(!notificationsOpen)}
-                  className="p-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 relative transition-colors"
+                  aria-label="Toggle notifications"
+                  aria-expanded={notificationsOpen}
+                  className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-slate-800 bg-slate-900 text-slate-300 transition-colors hover:border-slate-700"
                 >
                   <Bell className="w-5 h-5" />
                   {unreadCount > 0 && (
@@ -120,7 +129,7 @@ export function Navbar({ currentUser, onOpenAuth }: { currentUser: UserSession |
                 </button>
 
                 {notificationsOpen && (
-                  <div className="absolute right-0 mt-2 w-80 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-4 z-50">
+                  <div className="absolute right-0 z-50 mt-2 w-[calc(100vw-2rem)] max-w-sm rounded-2xl border border-slate-800 bg-slate-900 p-4 shadow-2xl">
                     <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-3">
                       <span className="font-semibold text-sm">Notifications</span>
                       <button className="text-xs text-cyan-400 hover:text-cyan-300" onClick={markAllNotificationsRead}>
@@ -138,8 +147,8 @@ export function Navbar({ currentUser, onOpenAuth }: { currentUser: UserSession |
                             onClick={() => setNotificationsOpen(false)}
                             className={`block p-2.5 rounded-lg border transition-colors ${notification.isRead ? "bg-slate-950 border-slate-800" : "bg-slate-800/60 border-cyan-500/20"}`}
                           >
-                            <p className="font-semibold text-white">{notification.title}</p>
-                            <p className="text-slate-400 mt-0.5">{notification.message}</p>
+                            <p className="break-words font-semibold text-white">{notification.title}</p>
+                            <p className="mt-0.5 break-words text-slate-400">{notification.message}</p>
                             <time className="text-[10px] text-slate-500 mt-1 block" dateTime={notification.createdAt}>
                               {new Date(notification.createdAt).toLocaleDateString()}
                             </time>
@@ -154,13 +163,13 @@ export function Navbar({ currentUser, onOpenAuth }: { currentUser: UserSession |
               {/* Profile Badge & Avatar */}
               <Link
                 href={`/players/${currentUser.profile?.username || currentUser.email}`}
-                className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-cyan-500/50 transition-all"
+                className="hidden min-w-0 items-center gap-2 rounded-xl border border-slate-800 bg-slate-900 py-1.5 pl-2 pr-3 transition-all hover:border-cyan-500/50 sm:flex lg:hidden xl:flex"
               >
                 <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-cyan-500 to-emerald-400 flex items-center justify-center font-bold text-black text-xs">
                   {currentUser.profile?.username?.[0]?.toUpperCase() || "U"}
                 </div>
-                <div className="hidden sm:flex flex-col text-left">
-                  <span className="text-xs font-semibold text-white leading-none">
+                <div className="hidden min-w-0 flex-col text-left xl:flex">
+                  <span className="max-w-32 truncate text-xs font-semibold leading-none text-white">
                     {currentUser.profile?.username}
                   </span>
                   <span className="text-[10px] text-amber-400 font-bold leading-tight">
@@ -171,7 +180,8 @@ export function Navbar({ currentUser, onOpenAuth }: { currentUser: UserSession |
 
               <button
                 onClick={handleLogout}
-                className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-rose-400 hover:border-rose-500/40 transition-colors"
+                className="hidden h-10 w-10 items-center justify-center rounded-xl border border-slate-800 bg-slate-900 text-slate-400 transition-colors hover:border-rose-500/40 hover:text-rose-400 lg:flex"
+                aria-label="Log out"
                 title="Logout"
               >
                 <LogOut className="w-4 h-4" />
@@ -180,7 +190,7 @@ export function Navbar({ currentUser, onOpenAuth }: { currentUser: UserSession |
           ) : (
             <button
               onClick={onOpenAuth}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-400 hover:from-cyan-400 hover:to-emerald-300 text-black font-bold text-sm shadow-lg shadow-cyan-500/20 transition-all hover:scale-105"
+              className="whitespace-nowrap rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-400 px-3 py-2 text-xs font-bold text-black shadow-lg shadow-cyan-500/20 transition-all hover:from-cyan-400 hover:to-emerald-300 sm:px-4 sm:text-sm"
             >
               Sign In / Register
             </button>
@@ -189,7 +199,9 @@ export function Navbar({ currentUser, onOpenAuth }: { currentUser: UserSession |
           {/* Mobile Menu Toggle Button */}
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="md:hidden p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300"
+            aria-label="Toggle navigation menu"
+            aria-expanded={mobileMenuOpen}
+            className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-800 bg-slate-900 text-slate-300 lg:hidden"
           >
             {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
           </button>
@@ -198,7 +210,7 @@ export function Navbar({ currentUser, onOpenAuth }: { currentUser: UserSession |
 
       {/* Mobile Drawer Menu */}
       {mobileMenuOpen && (
-        <div className="md:hidden border-b border-slate-800 bg-[#0b0f19] px-4 pt-2 pb-4 space-y-2">
+        <div className="space-y-2 border-b border-slate-800 bg-[#0b0f19] px-4 pb-4 pt-2 lg:hidden">
           <Link
             href="/tournaments"
             onClick={() => setMobileMenuOpen(false)}
@@ -236,13 +248,15 @@ export function Navbar({ currentUser, onOpenAuth }: { currentUser: UserSession |
               <LayoutDashboard className="w-4 h-4 text-emerald-400" /> Dashboard
             </Link>
           )}
-          {currentUser && (currentUser.role === "SUPER_ADMIN" || currentUser.role === "TOURNAMENT_ADMIN" || currentUser.role === "MODERATOR") && (
-            <Link
-              href="/admin"
-              onClick={() => setMobileMenuOpen(false)}
-              className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 font-bold text-sm"
-            >
-              <LayoutDashboard className="w-4 h-4" /> Admin Dashboard
+          {currentUser && (
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <Link href={`/players/${currentUser.profile?.username || currentUser.email}`} onClick={() => setMobileMenuOpen(false)} className="flex min-h-11 items-center justify-center rounded-xl border border-slate-800 bg-slate-900 px-3 text-sm font-semibold text-slate-200">My profile</Link>
+              <button type="button" onClick={handleLogout} className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 text-sm font-semibold text-rose-300"><LogOut className="h-4 w-4" /> Log out</button>
+            </div>
+          )}
+          {currentUser?.role === "SUPER_ADMIN" && (
+            <Link href="/dashboard/users" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-2.5 text-sm font-bold text-amber-400">
+              <Shield className="h-4 w-4" /> User management
             </Link>
           )}
         </div>

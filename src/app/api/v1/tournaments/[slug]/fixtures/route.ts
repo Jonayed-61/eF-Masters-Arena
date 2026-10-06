@@ -1,18 +1,17 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { canManageTournament, requireAuth } from "@/lib/auth";
-import { Role } from "@prisma/client";
 import { generateGroupFixturesEngine } from "@/lib/tournament-engine";
 import { logAudit } from "@/lib/audit";
+import { requireTournamentOwnerOrSuperAdmin } from "@/lib/permissions";
+import { handleApiError } from "@/lib/api-response";
 
-export async function POST(req: Request, { params }: { params: Promise<{ slug: string }> }) {
+export async function POST(_req: Request, { params }: { params: Promise<{ slug: string }> }) {
   try {
-    const user = await requireAuth([Role.SUPER_ADMIN, Role.TOURNAMENT_ADMIN]);
     const { slug } = await params;
 
     const tournament = await db.tournament.findUnique({ where: { slug } });
     if (!tournament) return NextResponse.json({ error: "Tournament not found" }, { status: 404 });
-    if (!(await canManageTournament(user, tournament.id))) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const user = await requireTournamentOwnerOrSuperAdmin(tournament.id);
 
     const matches = await generateGroupFixturesEngine(tournament.id);
 
@@ -26,7 +25,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
 
     return NextResponse.json({ success: true, message: `Generated ${matches.length} round robin matches`, matches });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : "Failed to generate fixtures";
-    return NextResponse.json({ error: errorMsg }, { status: 400 });
+    return handleApiError(err, "Fixtures could not be generated.");
   }
 }

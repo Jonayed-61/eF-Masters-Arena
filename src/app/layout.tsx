@@ -51,9 +51,9 @@ export default async function RootLayout({
 
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen flex flex-col bg-[#0b0f19] text-slate-100 pb-16 md:pb-0`}>
+      <body className={`${geistSans.variable} ${geistMono.variable} flex min-h-screen min-w-0 flex-col bg-[#0b0f19] pb-20 text-slate-100 antialiased md:pb-0`}>
         <NavbarWrapper currentUser={formattedUser}>
-          <main className="flex-1">{children}</main>
+          <main className="min-w-0 flex-1">{children}</main>
         </NavbarWrapper>
       </body>
     </html>

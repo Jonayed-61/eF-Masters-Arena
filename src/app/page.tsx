@@ -1,13 +1,15 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { TournamentCard } from "@/components/TournamentCard";
-import { Trophy, Shield, Sparkles, Users, ArrowRight, Zap, Award, Flame, MessageSquare } from "lucide-react";
+import { Trophy, Shield, Sparkles, ArrowRight, Zap, MessageSquare } from "lucide-react";
+import { MatchStatus, TournamentStatus } from "@prisma/client";
 
 export const revalidate = 0;
 
 export default async function HomePage() {
   // Fetch tournaments
   const tournaments = await db.tournament.findMany({
+    where: { status: { not: TournamentStatus.DRAFT } },
     take: 6,
     include: {
       season: true,
@@ -29,6 +31,7 @@ export default async function HomePage() {
 
   // Fetch top ranked players
   const topPlayers = await db.profile.findMany({
+    where: { rankingPoints: { gt: 0 } },
     take: 5,
     orderBy: [{ rankingPoints: "desc" }, { championships: "desc" }],
   });
@@ -43,20 +46,28 @@ export default async function HomePage() {
     orderBy: { dateCompleted: "desc" },
   });
 
-  // Fetch latest news
-  const latestNews = await db.news.findMany({ take: 3, orderBy: { published: "desc" } });
+  const [prizes, verifiedMatches, playerCount, completedTournaments, communitySettings, globalAnnouncement] = await Promise.all([
+    db.hallOfFame.aggregate({ _sum: { prizePool: true } }),
+    db.match.count({ where: { status: MatchStatus.CONFIRMED } }),
+    db.profile.count(),
+    db.tournament.count({ where: { status: TournamentStatus.COMPLETED } }),
+    db.systemSetting.findMany({ where: { key: { in: ["WHATSAPP_COMMUNITY", "DISCORD_LINK"] } } }),
+    db.announcement.findFirst({ where: { isGlobal: true }, orderBy: { createdAt: "desc" } }),
+  ]);
+  const settings = new Map(communitySettings.map((setting) => [setting.key, setting.value]));
+  const openTournamentCount = tournaments.filter((tournament) => tournament.status === TournamentStatus.REGISTRATION_OPEN).length;
 
   return (
-    <div className="space-y-16 pb-12">
+    <div className="min-w-0 space-y-12 pb-8 sm:space-y-16 sm:pb-12">
       {/* HERO SECTION */}
-      <section className="relative overflow-hidden bg-gradient-to-b from-cyan-950/30 via-slate-950 to-[#0b0f19] border-b border-slate-800/80 py-16 sm:py-24">
+      <section className="relative overflow-hidden border-b border-slate-800/80 bg-gradient-to-b from-cyan-950/30 via-slate-950 to-[#0b0f19] py-12 sm:py-24">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(6,182,212,0.15),rgba(255,255,255,0))] pointer-events-none"></div>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10 space-y-6">
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs font-bold uppercase tracking-wider animate-pulse">
-            <Zap className="w-3.5 h-3.5 text-cyan-400" /> eFootball Mobile Season 4 Live
+            <Zap className="w-3.5 h-3.5 text-cyan-400" /> {openTournamentCount > 0 ? `${openTournamentCount} registration${openTournamentCount === 1 ? "" : "s"} open` : "Competitive eFootball tournaments"}
           </div>
 
-          <h1 className="text-4xl sm:text-6xl font-black tracking-tight text-white max-w-4xl mx-auto leading-[1.1]">
+          <h1 className="mx-auto max-w-4xl break-words text-4xl font-black leading-[1.1] tracking-tight text-white sm:text-6xl">
             Compete. Win. Become a <span className="bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 via-emerald-400 to-amber-300">Champion.</span>
           </h1>
 
@@ -82,40 +93,43 @@ export default async function HomePage() {
           {/* Key Stats Counter Grid */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl mx-auto pt-8">
             <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
-              <span className="text-2xl font-black text-white">৳15,000+</span>
+              <span className="text-2xl font-black text-white">{prizes._sum.prizePool ?? 0}</span>
               <span className="text-[11px] block text-slate-400 font-semibold uppercase mt-0.5">Prizes Awarded</span>
             </div>
             <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
-              <span className="text-2xl font-black text-cyan-400">1,200+</span>
+              <span className="text-2xl font-black text-cyan-400">{verifiedMatches}</span>
               <span className="text-[11px] block text-slate-400 font-semibold uppercase mt-0.5">Matches Played</span>
             </div>
             <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
-              <span className="text-2xl font-black text-emerald-400">500+</span>
+              <span className="text-2xl font-black text-emerald-400">{playerCount}</span>
               <span className="text-[11px] block text-slate-400 font-semibold uppercase mt-0.5">Active Players</span>
             </div>
             <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
-              <span className="text-2xl font-black text-amber-400">100%</span>
-              <span className="text-[11px] block text-slate-400 font-semibold uppercase mt-0.5">Verified Payouts</span>
+              <span className="text-2xl font-black text-amber-400">{completedTournaments}</span>
+              <span className="text-[11px] block text-slate-400 font-semibold uppercase mt-0.5">Completed Events</span>
             </div>
           </div>
         </div>
       </section>
 
+      {globalAnnouncement && <section className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8"><div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 sm:p-5"><p className="text-xs font-black uppercase tracking-[0.18em] text-amber-300">Platform announcement</p><h2 className="mt-2 text-lg font-black text-white">{globalAnnouncement.title}</h2><p className="mt-2 whitespace-pre-wrap text-sm text-slate-300">{globalAnnouncement.content}</p></div></section>}
+
       {/* ACTIVE & UPCOMING TOURNAMENTS */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-2xl font-extrabold text-white flex items-center gap-2">
+        <div className="flex min-w-0 items-end justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="flex items-start gap-2 text-xl font-extrabold text-white sm:items-center sm:text-2xl">
               <Trophy className="w-6 h-6 text-cyan-400" /> Featured Tournaments
             </h2>
             <p className="text-xs text-slate-400">Join ongoing or open registration cups</p>
           </div>
-          <Link href="/tournaments" className="text-xs font-bold text-cyan-400 hover:underline flex items-center gap-1">
+          <Link href="/tournaments" className="flex shrink-0 items-center gap-1 text-xs font-bold text-cyan-400 hover:underline">
             View All <ArrowRight className="w-3.5 h-3.5" />
           </Link>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {enrichedTournaments.length === 0 && <div className="md:col-span-2 lg:col-span-3 rounded-3xl border border-slate-800 bg-slate-900/70 p-10 text-center"><Trophy className="mx-auto mb-3 h-8 w-8 text-slate-600" /><p className="font-bold text-white">No tournaments are currently available.</p><p className="mt-1 text-xs text-slate-400">Published tournaments will appear here.</p></div>}
           {enrichedTournaments.map((t) => (
             <TournamentCard key={t.id} tournament={t} />
           ))}
@@ -137,22 +151,23 @@ export default async function HomePage() {
           </div>
 
           <div className="space-y-3">
+            {topPlayers.length === 0 && <p className="rounded-2xl border border-slate-800 bg-slate-950 p-8 text-center text-xs text-slate-400">No rankings are available yet.</p>}
             {topPlayers.map((p, idx) => (
-              <div key={p.id} className="flex items-center justify-between p-3 rounded-2xl bg-slate-950/70 border border-slate-800/80 hover:border-slate-700 transition-colors">
-                <div className="flex items-center gap-3">
+              <div key={p.id} className="flex min-w-0 flex-col gap-3 rounded-2xl border border-slate-800/80 bg-slate-950/70 p-3 transition-colors hover:border-slate-700 min-[430px]:flex-row min-[430px]:items-center min-[430px]:justify-between">
+                <div className="flex min-w-0 items-center gap-3">
                   <span className={`w-7 h-7 rounded-xl font-extrabold text-xs flex items-center justify-center ${
                     idx === 0 ? "bg-amber-400 text-black shadow-md shadow-amber-400/20" : idx === 1 ? "bg-slate-300 text-black" : idx === 2 ? "bg-amber-700 text-white" : "bg-slate-800 text-slate-400"
                   }`}>
                     #{idx + 1}
                   </span>
-                  <div>
-                    <Link href={`/players/${p.username}`} className="font-bold text-sm text-white hover:text-cyan-400 block">
+                  <div className="min-w-0">
+                    <Link href={`/players/${p.username}`} className="block truncate text-sm font-bold text-white hover:text-cyan-400">
                       {p.fullName} ({p.username})
                     </Link>
-                    <span className="text-[10px] text-slate-400">{p.teamName} • IGN: {p.efootballIgn}</span>
+                    <span className="block truncate text-[10px] text-slate-400">{p.teamName} • IGN: {p.efootballIgn}</span>
                   </div>
                 </div>
-                <div className="text-right">
+                <div className="shrink-0 text-left min-[430px]:text-right">
                   <span className="text-sm font-extrabold text-amber-400 font-mono block">🏆 {p.rankingPoints} pts</span>
                   <span className="text-[10px] text-slate-500 font-semibold">{p.championships} Championships</span>
                 </div>
@@ -170,11 +185,12 @@ export default async function HomePage() {
             <p className="text-xs text-slate-400">Historic tournament champions</p>
 
             <div className="space-y-3 pt-2">
+              {champions.length === 0 && <p className="rounded-2xl border border-slate-800 bg-slate-950 p-6 text-center text-xs text-slate-400">No champions have been recorded.</p>}
               {champions.map((c) => (
-                <div key={c.id} className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
-                  <span className="text-[10px] font-semibold text-cyan-400 uppercase">{c.tournament.name}</span>
-                  <div className="flex items-center justify-between">
-                    <span className="font-extrabold text-sm text-amber-300 flex items-center gap-1">
+                <div key={c.id} className="min-w-0 space-y-1 rounded-2xl border border-slate-800 bg-slate-950 p-3.5">
+                  <span className="block truncate text-[10px] font-semibold uppercase text-cyan-400">{c.tournament.name}</span>
+                  <div className="flex min-w-0 flex-col gap-1 min-[390px]:flex-row min-[390px]:items-center min-[390px]:justify-between">
+                    <span className="flex min-w-0 items-center gap-1 truncate text-sm font-extrabold text-amber-300">
                       👑 {c.champion.profile?.username}
                     </span>
                     <span className="text-xs font-bold text-emerald-400">Prize ৳{c.prizePool}</span>
@@ -191,15 +207,15 @@ export default async function HomePage() {
       </section>
 
       {/* COMMUNITY & SOCIAL LINKS */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="p-8 rounded-3xl bg-gradient-to-r from-cyan-950/60 via-slate-900 to-emerald-950/60 border border-slate-800 text-center space-y-4">
+      {(settings.get("WHATSAPP_COMMUNITY") || settings.get("DISCORD_LINK")) && <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="space-y-4 rounded-3xl border border-slate-800 bg-gradient-to-r from-cyan-950/60 via-slate-900 to-emerald-950/60 p-5 text-center sm:p-8">
           <h3 className="text-2xl font-extrabold text-white">Join the eF Masters Community</h3>
           <p className="text-xs text-slate-300 max-w-xl mx-auto">
             Get instant match reminders, group draw announcements, referee support, and chat with fellow eFootball Mobile gamers.
           </p>
           <div className="flex flex-wrap items-center justify-center gap-4 pt-2">
             <a
-              href="https://chat.whatsapp.com/efmasters"
+              href={settings.get("WHATSAPP_COMMUNITY") || "#"}
               target="_blank"
               rel="noreferrer"
               className="px-6 py-3 rounded-xl bg-emerald-500 text-black font-extrabold text-xs flex items-center gap-2 hover:bg-emerald-400 transition-colors"
@@ -207,7 +223,7 @@ export default async function HomePage() {
               <MessageSquare className="w-4 h-4" /> Official WhatsApp Group
             </a>
             <a
-              href="https://discord.gg/efmasters"
+              href={settings.get("DISCORD_LINK") || "#"}
               target="_blank"
               rel="noreferrer"
               className="px-6 py-3 rounded-xl bg-indigo-600 text-white font-extrabold text-xs flex items-center gap-2 hover:bg-indigo-500 transition-colors"
@@ -216,12 +232,12 @@ export default async function HomePage() {
             </a>
           </div>
         </div>
-      </section>
+      </section>}
 
       {/* FOOTER */}
-      <footer className="border-t border-slate-800/80 pt-8 text-center text-xs text-slate-500 space-y-2">
+      <footer className="space-y-3 border-t border-slate-800/80 px-4 pt-8 text-center text-xs text-slate-500 sm:px-6">
         <p>© 2026 eF Masters Arena. All rights reserved. eFootball is a registered trademark of Konami Digital Entertainment.</p>
-        <div className="flex items-center justify-center gap-4 text-slate-400">
+        <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-slate-400">
           <Link href="/tournaments" className="hover:text-cyan-400">Tournaments</Link>
           <Link href="/rankings" className="hover:text-cyan-400">Leaderboard</Link>
           <Link href="/hall-of-fame" className="hover:text-cyan-400">Hall of Fame</Link>

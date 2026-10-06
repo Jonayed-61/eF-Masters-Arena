@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { handleApiError } from "@/lib/api-response";
 
 export async function POST(req: Request) {
   try {
@@ -43,7 +44,6 @@ export async function POST(req: Request) {
       },
     });
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : "Failed to validate coupon";
-    return NextResponse.json({ error: errorMsg }, { status: 400 });
+    return handleApiError(err, "Coupon validation failed.");
   }
 }

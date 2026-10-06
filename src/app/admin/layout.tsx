@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { Role } from "@prisma/client";
 import { getCurrentUser } from "@/lib/auth";
-import { AdminShell } from "./AdminShell";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUser();
@@ -9,5 +8,5 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   if (!allowed) redirect("/?auth=login");
 
-  return <AdminShell userRole={user.role}>{children}</AdminShell>;
+  return <>{children}</>;
 }
